@@ -1,0 +1,1048 @@
+= Packages and Modules
+Felix;
+:source-highlighter: codery
+:doctype: book
+//:icons: font
+//:page-layout: docs
+//:sectanchors:
+//:icons: font
+//:source-language: asciidoctor
+:toc: left
+:toclevels: 3
+//:sectlinks:
+
+[[overview]]
+== Overview
+如果一组包具有足够的内聚性，则可以将包分组到模块中。
+模块将其部分或所有包分类为导出包，这意味着可以从模块外部的代码访问它们的类型。
+如果一个包不是由模块导出的，那么只有模块内部的代码可以访问它的类型。
+此外，如果模块中的代码希望访问另一个模块导出的包，那么第一个模块必须显式地依赖于第二个模块。
+因此，模块控制它的包如何使用其他模块(通过指定依赖关系)，并控制其他模块如何使用它的包(通过指定导出哪些包)。
+
+模块和包可以存储在文件系统或数据库中。
+存储在文件系统中的模块和包可能对它们的编译单元的组织有一定的约束，从而允许简单的实现轻松地查找模块和类型声明。
+编译单元中的代码自动访问包中声明的所有类型，并自动导入预定义包 `+java.lang+` 中声明的所有公共类型。
+
+只有在声明类型为 `+public+` 时，才可以在声明它的包外部访问顶级类型。
+只有当类型声明为 `+public+` 并且是导出包的成员时，才能在声明它的模块之外访问顶级类型。
+声明为 `+public+` 但不是导出包成员的类型只能由模块内的代码访问。
+
+对于小型程序和临时开发，包可以是匿名的，或者有一个简单的名称，但是如果代码要广泛分布，应该使用限定名称选择惟一的包名称。
+如果两个开发组碰巧选择了相同的包名，并且这些包稍后将在单个程序中使用，那么这可以防止可能发生的冲突。
+
+
+
+[[package-members]]
+== 7.1. Package Members
+包的成员是它的子包以及包的所有编译单元中声明的所有顶级类类型和顶级接口类型。
+====
+例如，在 Java SE Platform API 中：
+
+- `java` 包有子包 `awt`、`applet`、`io`、`lang`、`net` 和 `util` ，但是没有编译单元。
+- `java.awt` 有一个名为 `image` 的子包，以及一些包含类和接口类型声明的编译单元。
+====
+
+如果一个包的完全限定名是 _P_ , _Q_ 是 _P_ 的子包，则 _P.Q_ 是子包的完全限定名，进一步表示包。
+
+包不可以包含两个相同名称的成员，否则产生编译时错误。
+====
+这儿有一些例子：
+
+- 因为 `java.awt` 有个子包 `image`，它不能(也不可以)包含一个名为 `image` 的类或接口类型的声明。
+- 如果有一个名为 `mouse` 的包，并且包中含有一个成员类型为 `Button` (然后可以将其称为 `mouse.Button`)，那么就不能有任何具有完全限定名 `mouse.Button` 或 `mouse.Button.Click`。
+- 如果一个类型的完全限定名是 `com.nighthacks.java.jag`，那么包的完全限定名就不能是 `com.nighthacks.java.jag` 或者 `com.nighthacks.java.jag.scrabble`。
+
+但是，不同包的成员可能具有相同的简单名称。
+
+例如，可以声明一个包：
+
+....
+package vector;
+public class Vector { Object[] vec; }
+....
+
+它的成员是一个名为 `Vector` 的公共类，尽管 `java.util` 也声明了一个名为 `Vector` 的类。
+这两种类类型是不同的，反映在它们有不同的完全限定名上。
+这个示例 `Vector` 的完全限定名是 `vector.Vector`，而 `java.util.Vector` 是 *Java SE* 平台中包含的 `Vector` 类的完全限定名。
+因为 `vector` 包含 `Vector` 类，所以它不能含有一个名为 `Vector` 的子包。
+====
+
+
+包的分层命名结构是为了方便以传统方式组织相关包，但是除了禁止包的子包与包中声明的顶级类型具有相同的简单名称之外，它本身没有任何意义。
+====
+
+例如，一个名为 `oliver` 的包和另一个名为 `oliver.twist` 的包之间没有特殊的访问关系，
+或者在名为 `evelyn.wood` 和 `evelyn.waugh` 的包之间。
+也就是说，名为 `oliver.twist` 的包对访问包 `oliver` 中声明的类型，并不比访问任何其他包中的代码方便。
+====
+
+
+
+== 7.2. Host Support for Modules and Packages
+每个主机系统决定如何创建和存储模块、包和编译单元。
+
+每个主机系统决定在特定编译中哪些编译单元是可观察到的。
+每个主机系统还确定与模块相关联的可观察编译单元。
+与模块关联的编译单元的可观察性决定了哪些模块是可观察的、哪些包在这些模块中是可见的。
+====
+主机系统可以自由地确定包含模块声明的编译单元实际上不是可观察的，因此不与其中声明的模块相关联。
+这使得编译器能够选择 `modulesourcepath` 上的哪个目录“真正”是给定模块的实现。
+但是，如果主机系统确定包含模块声明的编译单元是可观察的，则要求编译单元必须与其中声明的模块相关联，而不能与任何其他模块相关联。
+
+主机系统可以自由地确定包含类型声明的编译单元(第一)是可观察的，(第二)与未命名模块或自动模块相关联——尽管在任何可观察或其他编译单元中不存在未命名或自动模块的声明。
+====
+
+
+在Java SE平台的简单实现中，包和编译单元可以存储在本地文件系统中。
+其他实现可以使用分布式文件系统或某种形式的数据库来存储它们。
+
+如果主机系统在数据库中存储包和编译单元，那么数据库不能对基于文件的实现中允许的编译单元施加可选的限制。
+====
+例如，使用数据库存储包的系统可能不会对每个编译单元强制执行最多一个公共类或接口。
+====
+
+
+但是，使用数据库的系统必须提供一个选项，以便将程序转换为遵守这些限制的表单，以便导出到基于文件的实现。
+====
+作为在文件系统中存储包的一个极其简单的示例，项目中的所有包、源和二进制代码可能存储在单个目录及其子目录中。
+该目录的每个直接子目录将表示顶级包，即其完全限定名由单个简单名称组成的包。
+子目录的每一层都表示包含目录的包的子包，依此类推。
+
+目录可能包含以下直接子目录：
+....
+com
+gls
+jag
+java
+wnj
+....
+
+其中目录 `java` 将包含 _Java SE_ Platform包；
+目录 `jag`、`gls` 和 `wnj` 可能包含本规范的三位作者为个人使用而创建的包，并在这个小组内相互分享；
+目录 `com` 将包含从使用中描述的约定的公司采购的包，以生成其包的唯一名称。
+
+继续该示例，目录java将包含以下子目录：
+....
+applet
+awt
+io
+lang
+net
+util
+....
+
+对应于 `java.applet`、`java.awt`、`java.io`、`java.lang`、`java.net` 和 `java.util` 包，它们被定义为 Java SE Platform API 的一部分。
+
+仍然继续这个例子，如果我们查看目录 `util` ，我们可能会看到以下文件：
+....
+BitSet.java        Observable.java
+BitSet.class       Observable.class
+Date.java          Observer.java
+Date.class         Observer.class
+...
+....
+
+其中每个 `.java` 文件都包含编译单元的源，其中包含类或接口的定义，其二进制编译形式包含在相应的 `.class` 文件中。
+
+在这种简单的包组织下，Java SE平台的实现将通过连接包名称的组件将包名称转换为路径名，在相邻组件之间放置文件名分隔符（目录指示符）。
+
+例如，如果在文件名分隔符为 / 的操作系统上使用此简单组织，则包名称为：
+....
+jag.scrabble.board
+....
+
+将被转换为目录名称：
+....
+jag/scrabble/board
+....
+
+包名称组件或类名称可能包含无法正确显示在主机文件系统的普通目录名称中的字符，例如系统上仅允许文件名中包含 ASCII 字符的 Unicode 字符。
+作为约定，可以通过使用 @ 字符后跟四个十六进制数字来转义字符，如 `\uxxxx` 转义。
+
+根据这个约定，包名称：
+....
+children.activities.crafts.papierM\u00e2ch\u00e9
+....
+
+也可以使用完整的 Unicode 编写：
+....
+children.activities.crafts.papierMâché
+....
+
+可能会映射到目录名称：
+....
+children/activities/crafts/papierM@00e2ch@00e9
+....
+
+如果 @ 字符不是某个给定主机文件系统的文件名中的有效字符，则可以使用在标识符中无效的其他字符。
+====
+
+
+
+== 7.3. Compilation Units
+编译单元是 Java 程序语法的目标符号。它由以下生产定义：
+[source, java]
+----
+CompilationUnit:
+    OrdinaryCompilationUnit
+    ModularCompilationUnit
+
+OrdinaryCompilationUnit:
+    [PackageDeclaration] {ImportDeclaration} {TypeDeclaration}
+
+ModularCompilationUnit:
+    {ImportDeclaration} ModuleDeclaration
+----
+
+普通的编译单元由三部分组成，每部分都是可选的：
+
+* `package` 声明，给出编译单元所属的包的完全限定名。 +
+没有包声明的编译单元是未命名包的一部分。
+* `import` 声明，这些声明允许使用简单名称引用来自其他包的类型和类型的 `static` 成员。
+* 类和接口类型的顶级类型声明。
+
+模块化编译单元由 `module` 声明组成，可选地在 `import` 声明之后。
+`import` 声明允许使用 `module` 声明中的简单名称来引用此模块中的包和其他模块中的类型以及类型的 `static` 成员。
+
+每个编译单元都隐式导入在预定义包 `java.lang` 中声明的每个公共类型名称，就好像声明 `import java.lang.*`；
+在任何 `package` 声明之后立即出现在每个编译单元的开头。因此，所有这些类型的名称在每个编译单元中都可以作为简单名称使用。
+
+主机系统确定哪些编译单元是可观察的，除了预定义包 `java` 及其子包 `lang` 和 `io` 中的编译单元，它们总是可观察的。
+
+每个可观察的编译单元可以与模块相关联，如下所示：
+
+* 主机系统可以确定一个可观察的普通编译单元与主机系统选择的模块相关联，但是预定义包 `java` 及其子包 `lang` 和 `io` 中的普通编译单元除外，它们都与 `java.base` 模块相关联。
+* 主机系统必须确定可观察的模块化编译单元与模块化编译单元声明的模块相关联。
+
+编译单元的可观察性影响其包的可观察性，而可观察的编译单元与模块的关联影响该模块的可观察性。
+
+在编译与模块 M 关联的模块化和普通编译单元时，主机系统必须尊重 M 声明中指定的依赖关系。
+具体来说，主机系统必须将原本可以观察的普通编译单元限制为仅对 M 可见的那些单元。
+M 可见的普通编译单元是与 M 读取的模块相关联的可观察的普通编译单元。
+M 读取的模块由解析结果给出，如 `java.lang.module` 包规范中所述，M 作为唯一的根模块。
+主机系统必须执行分辨率以确定 M 读取的模块；如果由于 `java.lang.module` 包规范中描述的任何原因解析失败，则是编译时错误。
+
+可读性关系是自反的，因此 M 自己读取，因此与 M 相关的所有模块化和普通编译单元对 M 都是可见的。
+
+由 M 读取的模块驱动对 M 唯一可见的包，而 M 又驱动作用域中的顶级包以及与 M 关联的模块和普通编译单元中代码的包名的含义。
+
+上述规则确保模块化编译单元中的注释中使用的包/类型名称（特别是应用于模块声明的注释）被解释为它们出现在与模块关联的普通编译单元中。
+
+在不同的普通编译单元中声明的类型可以循环地相互引用。Java编译器必须安排同时编译所有这些类型。
+
+
+
+== 7.4. Package Declarations
+包声明出现在普通编译单元中，以指示编译单元所属的包。
+
+=== 7.4.1. Named Packages
+普通编译单元中的包声明指定编译单元所属的包名。
+
+[source, java]
+----
+PackageDeclaration:
+    {PackageModifier} package Identifier {. Identifier} ;
+PackageModifier:
+    Annotation
+----
+`package` 声明中提到的包名称必须是包的完全限定名称。
+
+包声明的范围和阴影在 https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.3[§6.3] 和 https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.4[§6.4] 中规定。
+
+包声明上的注释修饰符规则在 https://docs.oracle.com/javase/specs/jls/se11/html/jls-9.html#jls-9.7.4[§9.7.4] 和 https://docs.oracle.com/javase/specs/jls/se11/html/jls-9.html#jls-9.7.5[§9.7.5] 中规定。
+
+对于给定的包，最多允许一个带注释的包声明。
+
+强制执行此限制的方式必然因实施而异。
+对于基于文件系统的实现，强烈建议使用以下方案：唯一带注释的包声明（如果存在）放在包含包源文件的目录中名为 `package-info.java` 的源文件中。
+此文件不包含名为 `package-info` 的类的源；事实上，这样做是违法的，因为 `package-info.java` 不是合法的标识符。
+通常，`package-info.java` 仅包含一个 `package` 声明，紧接在包的注释之前。
+虽然该文件在技术上可以包含一个或多个具有包访问权限的类的源代码，但它将是非常糟糕的形式。
+
+建议 `package-info.java`（如果存在）取代 `package.html` 用于 `javadoc` 和其他类似的文档生成系统。
+如果存在此文件，则文档生成工具应在 `package-info.java` 中的（可能带注释的）包声明之前查找包文档注释。
+通过这种方式，`package-info.java` 成为包级注释和文档的唯一存储库。
+如果将来需要添加任何其他包级信息，那么此文件应该是此信息的便利之家。
+
+
+=== 7.4.2. Unnamed Packages
+没有 `package` 声明的普通编译单元是未命名包的一部分。
+
+*Java SE* 平台提供了未命名的包，主要是为了方便开发小型或临时应用程序或刚开始开发时。
+
+未命名的包不能包含子包，因为 `package` 声明的语法始终包含对指定的顶级包的引用。
+
+Java SE平台的实现必须至少支持一个未命名的包。实现可能支持多个未命名的包，但不是必须这样做。
+每个未命名包中的哪些普通编译单元由主机系统确定。
+
+主机系统必须将未命名包中的普通编译单元与未命名的模块相关联，而不是命名模块。
+
+====
+.Example 7.4.2-1. Unnamed Package
+编译单元：
+======
+[source, java]
+----
+class FirstCall {
+    public static void main(String[] args) {
+        System.out.println("Mr. Watson, come here. "
+                           + "I want you.");
+    }
+}
+----
+======
+将一个非常简单的编译单元定义为未命名包的一部分。
+====
+
+在使用分层文件系统存储包的Java SE平台的实现中，一种典型的策略是将未命名的包与每个目录相关联；
+一次只能观察到一个未命名的包，即与“当前工作目录”相关联的包。 “当前工作目录”的确切含义取决于主机系统。
+
+
+
+=== 7.4.3. Package Observability and Visibility
+当且仅当至少满足下列条件之一时，才能观察到包：
+
+* 可观察到包含包声明的普通编译单元 （ https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.3[§7.3] ）。
+* 可以观察到包的子包。
+
+包 `java`、`java.lang` 和 `java.io` 始终是可观察的。
+
+====
+可以从上面的规则和可观察的编译单元的规则得出这样的结论，如下所述。
+预定义包 `java.lang` 声明了 `Object` 类，因此 `Object` 的编译单元始终是可观察的（ https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.3[§7.3] ）。
+因此，`java.lang` 包是可观察的，而 `java` 包也是。
+此外，由于 `Object` 是可观察的，因此隐式存在数组类型 `Object[]`。
+它的超接口 `java.io.Serializable`（ https://docs.oracle.com/javase/specs/jls/se11/html/jls-10.html#jls-10.1[§10.1] ）也存在，因此 `java.io` 包是可观察的。
+====
+
+当且仅当包含包的声明的普通编译单元对 M 可见时，包对模块 M 可见。
+====
+包可见性意味着暗示包可以以有用的方式观察给定模块。
+仅仅因为子包 _P.Q_ 是可观察的而知道包 _P_ 是可观察的，这通常是没有用的。
+例如，假设 _P.Q_ 是可观察的（在模块 M1 中）并且 _P.R_ 是可观察的（在模块 M2 中）；然后，_P_ 是可观察的，但在哪里？
+在 M1 或 M2，或两者兼而有之？
+这个问题是多余的；在编译仅需要 M1 的模块 N 期间，重要的是 _P.Q_ 是可观察的，但 _P_ 是可观察的并不重要。
+====
+
+当且仅当以下之一成立时，包对模块 M 是唯一可见的：
+
+* 与 M 关联的普通编译单元包含包的声明，并且 M 不读取将包导出到 M 的任何其他模块。
+* 没有与 M 关联的普通编译单元包含包的声明，而 M 正好读取另一个将包导出到 M 的模块。
+
+
+
+== 7.5. Import Declarations
+`import` 声明允许通过由单个标识符组成的简单名称引用命名类型或静态成员。
+
+如果不使用适当的 `import` 声明，引用另一个包中声明的类型或另一个类型的静态成员的唯一方法是使用完全限定的名称。
+[source, java]
+----
+ImportDeclaration:
+    SingleTypeImportDeclaration
+    TypeImportOnDemandDeclaration
+    SingleStaticImportDeclaration
+    StaticImportOnDemandDeclaration
+----
+
+* `single-type-import` 声明( <<single-type-import, §7.5.1>> )通过提及其规范名称来导入单个命名类型。
+* `type-import-on-demand` 声明( <<type-import-on-demand, §7.5.2>> )通过提及类型或包的规范名称，根据需要导入命名类型或命名包的所有可访问类型。
+* `single-static-import` 声明( <<single-static-import, §7.5.3>> )通过给出其规范名称，从类型中导入具有给定名称的所有可访问 `static` 成员。
+* `static-import-on-demand` 声明( <<static-import-on-demand, §7.5.4>> )通过提及类型的规范名称，根据需要导入所有可访问的命名类型的 `static` 成员。
+
+这些声明导入的类型或成员的范围和阴影在 https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.3[§6.3] 和 https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.4[§6.4] 中规定。
+
+`import` 声明仅在实际包含 `import` 声明的编译单元中通过其简单名称使类型或成员可用。
+`import` 声明引入的类型或成员的范围具体不包括同一包中的其他编译单元、当前编译单元中的其他 `import` 声明或当前编译单元中的包声明(包声明的注释除外)。
+
+
+[[single-type-import]]
+=== 7.5.1. Single-Type-Import Declarations
+`single-type-import` 声明通过提供其规范名称来导入单个类型，从而使其在出现 `single-type-import` 声明的编译单元的模块、类和接口声明的简单名称下可用。
+[source,java]
+----
+SingleTypeImportDeclaration:
+    import TypeName ;
+----
+`TypeName` 必须是类类型、接口类型、枚举类型或注解类型的规范名称。
+
+*类型必须是命名包的成员，或者是其最外层在词法上封闭类型声明(https://docs.oracle.com/javase/specs/jls/se11/html/jls-8.html#jls-8.1.3[§8.1.3])是命名包的成员的类型的成员，或者发生编译时错误。*
+
+*如果无法访问命名类型，则为编译时错误(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.6[§6.6])。*
+
+*如果同一编译单元中的两个 `single-type-import` 声明尝试导入具有相同简单名称的类型，则会发生编译时错误，除非这两种类型的类型相同，在这种情况下将忽略重复声明。*
+
+如果在包含 `import` 声明的编译单元中声明了 `single-type-import` 声明导入的类型，则忽略 `import` 声明。
+
+*如果 `single-type-import` 声明导入一个简单名称为 `n` 的类型，并且编译单元也声明了一个简单名称为 `n` 的顶级类型(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.6[§7.6])，则会发生编译时错误。*
+
+*如果编译单元既包含导入简单名称为 n 的类型的 `single-type-import` 声明，也包含导入简单名称为 n 的类型的 `single-static-import` 声明(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.5.3[§7.5.3])，则发生编译时错误，除非这两种类型是相同的类型，在这种情况下，将忽略重复声明。*
+
+
+====
+.Example 7.5.1-1. Single-Type-Import
+======
+[source, java]
+----
+import java.util.Vector;
+----
+======
+导致简单名称 `Vector` 在编译单元的类和接口声明中可用。
+因此，简单名称 `Vector` 引用包 `java.util` 中的类型声明 `Vector`，它在所有未被阴影化(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.4.1[§6.4.1])或模糊(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.4.2[§6.4.2])的地方通过声明字段、参数、本地变量或具有相同名称的嵌套类型声明。
+
+请注意，`java.util.Vector` 的实际声明是通用的(https://docs.oracle.com/javase/specs/jls/se11/html/jls-8.html#jls-8.1.2[§8.1.2])。
+导入后，名称`Vector` 可以在参数化类型（如 `Vector<String>`）中无需限定地使用，或者作为原始类型 `Vector` 使用。
+`import` 声明的相关限制是可以导入在泛型类型声明中声明的嵌套类型，但始终会擦除其外部类型。
+====
+
+====
+.Example 7.5.1-2. Duplicate Type Declarations
+这个程序：
+======
+[source, java]
+----
+import java.util.Vector;
+class Vector { Object[] vec; }
+----
+======
+
+由于 `Vector` 的重复声明导致编译时错误，如下所示：
+======
+[source, java]
+----
+import java.util.Vector;
+import myVector.Vector;
+----
+======
+
+其中 `myVector` 是包含编译单元的包：
+======
+[source, java]
+----
+package myVector;
+public class Vector { Object[] vec; }
+----
+======
+====
+
+====
+.Example 7.5.1-3. No Import of a Subpackage
+请注意，`import` 声明不能导入子包，只能导入类型。
+
+例如，尝试导入 `java.util` 然后使用名称 `util.Random` 来引用 `java.util.Random` 类型是行不通的：
+======
+[source, java]
+----
+import java.util;
+class Test { util.Random generator; }
+  // incorrect: compile-time error
+----
+======
+====
+
+====
+.Example 7.5.1-4. Importing a Type Name that is also a Package Name
+根据 https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.1[§6.1] 中描述的命名约定，包名称和类型名称通常是不同的。
+然而，在一个人为的例子中，有一个非常规命名的包 `Vector` ，它声明了一个名为 `Mosquito` 的公共类：
+======
+[source, java]
+----
+package Vector;
+public class Mosquito { int capacity; }
+----
+======
+然后是编单元：
+======
+[source, JAVA]
+----
+package strange;
+import java.util.Vector;
+import Vector.Mosquito;
+class Test {
+    public static void main(String[] args) {
+        System.out.println(new Vector().getClass());
+        System.out.println(new Mosquito().getClass());
+    }
+}
+----
+======
+从包 `java.util` 导入类 `Vector` 的 `single-type-import` 声明不会阻止包名称 `Vector` 在后续导入声明中出现并被正确识别。该示例编译并生成输出：
+======
+[source, java]
+----
+class java.util.Vector
+class Vector.Mosquito
+----
+======
+====
+
+
+
+[[type-import-on-demand]]
+=== 7.5.2. Type-Import-on-Demand Declarations
+`type-import-on-demand` 声明允许根据需要导入命名包或类型的所有可访问类型。
+====
+[source, java, indent=0]
+----
+TypeImportOnDemandDeclaration:
+    import PackageOrTypeName . * ;
+----
+====
+`PackageOrTypeName` 必须是包的规范名称(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.7[§6.7])、类类型、接口类型、枚举类型或注释类型。
+
+*如果 `PackageOrTypeName` 表示类型(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.5.4[§6.5.4])，则该类型必须是命名包的成员，或者是最外层词法封闭类型声明(https://docs.oracle.com/javase/specs/jls/se11/html/jls-8.html#jls-8.1.3[§8.1.3])是命名成员的类型的成员包，或发生编译时错误。*
+
+*如果命名包对当前模块(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.4.3[§7.4.3])不是唯一可见的，或者如果命名类型不可访问(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.6[§6.6])，则是编译时错误。*
+
+在 `type-import-on-demand` 声明中命名 `java.lang` 或当前编译单元的命名包不是编译时错误。
+在这种情况下，将忽略 `type-import-on-demand` 声明。
+
+同一编译单元中的两个或多个 `type-import-on-demand` 声明可以命名相同的类型或包。
+除了其中一个声明之外的所有声明都被视为多余的；效果就好像该类型只导入一次。
+
+如果编译单元同时包含 `type-import-on-demand` 声明和名为相同类型的 `static-import-on-demand` 声明(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.5.4[§7.5.4])，
+则效果就像该类型的 `static` 成员类型一样(https://docs.oracle.com/javase/specs/jls/se11/html/jls-8.html#jls-8.5[§8.5], https://docs.oracle.com/javase/specs/jls/se11/html/jls-9.html#jls-9.5[§9.5])仅导入一次。
+
+====
+.Example 7.5.2-1. Type-Import-on-Demand
+======
+[source,java,indent=0]
+----
+import java.util.*;
+----
+======
+导致 `java.util` 包中声明的所有公共类型的简单名称在编译单元的类和接口声明中可用。
+因此，简单名称 `Vector` 在编译单元中的所有位置引用包 `java.util` 中的类型 `Vector` ，其中该类型声明未被镜像(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.4.1[§6.4.1])或模糊(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.4.2[§6.4.2])。
+
+声明可能会被一个简单名称为 `Vector` 的类型的 `single-type-import` 声明所掩盖；
+通过名为 `Vector` 的类型并在编译单元所属的包中声明；或任何嵌套的类或接口。
+
+声明可能会被名为 `Vector` 的字段、参数或局部变量的声明所掩盖。
+
+（任何这些情况都会发生。）
+====
+
+
+
+
+[[single-static-import]]
+=== 7.5.3. Single-Static-Import Declarations
+`single-static-import` 声明从类型导入具有给定简单名称的所有可访问 `static` 成员。
+这使得这些 `static` 成员在其出现 `single-static-import` 声明的编译单元的模块、类和接口声明中以其简单名称可用。
+
+====
+[source, java, indent=0]
+----
+SingleStaticImportDeclaration:
+import static TypeName . Identifier ;
+----
+====
+`TypeName` 必须是类类型、接口类型、枚举类型或注释类型的规范名称(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.7[§6.7])。
+
+*该类型必须是命名包的成员，或者是最外层词法封闭类型声明(https://docs.oracle.com/javase/specs/jls/se11/html/jls-8.html#jls-8.1.3[§8.1.3])是命名包的成员的类型的成员，否则会发生编译时错误。*
+
+*如果无法访问命名类型，则为编译时错误(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.6[§6.6])。*
+
+*标识符必须至少命名一个指定类型的 `static` 成员。如果没有该名称的 `static` 成员，或者所有命名成员都不可访问，则为编译时错误。*
+
+允许一个 `single-static-import` 声明导入多个具有相同名称的字段或类型，或多个具有相同名称和签名的方法。
+当命名类型从其自己的超类型继承多个具有相同名称的字段、成员类型或方法时，会发生这种情况。
+
+如果同一编译单元中的两个 `single-static-import` 声明尝试导入具有相同简单名称的类型，则会发生编译时错误，除非这两种类型是相同类型，在这种情况下将忽略重复声明。
+
+*如果 `single-static-import` 声明导入一个简单名称为 n 的类型，并且编译单元也声明了一个简单名称为 n 的顶级类型(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.6[§7.6])，则会发生编译时错误。*
+
+*如果编译单元既包含导入简单名称为 n 的类型的 `single-static-import` 声明，又包含导入简单名称为 n 的类型的 `single-type-import` 声明（第7.5.1节），则发生编译时错误，除非这两种类型是相同的类型，在这种情况下，将忽略重复声明。*
+
+
+
+[[static-import-on-demand]]
+=== 7.5.4. Static-Import-on-Demand Declarations
+`static-import-on-demand` 声明允许根据需要导入命名类型的所有可访问 `static` 成员。
+====
+[source, java, indent=0]
+----
+StaticImportOnDemandDeclaration:
+import static TypeName . * ;
+----
+====
+`TypeName` 必须是类类型、接口类型、枚举类型或注释类型的规范名称(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.7[§6.7])。
+
+*该类型必须是命名包的成员，或者是最外层词法封闭类型声明(https://docs.oracle.com/javase/specs/jls/se11/html/jls-8.html#jls-8.1.3[§8.1.3])是命名包的成员的类型的成员，否则会发生编译时错误。*
+
+*如果无法访问命名类型，则为编译时错误(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.6[§6.6])。*
+
+同一编译单元中的两个或多个 `static-import-on-demand` 声明可以命名相同的类型；效果就好像只有一个这样的声明。
+
+同一编译单元中的两个或多个 `static-import-on-demand` 声明可以命名同一个成员；效果就好像该成员只导入了一次。
+
+允许一个 `static-import-on-demand` 声明导入具有相同名称的多个字段或类型，或者具有相同名称和签名的多个方法。
+当命名类型从其自己的超类型继承多个具有相同名称的字段、成员类型或方法时，会发生这种情况。
+
+如果编译单元同时包含 `static-import-on-demand` 声明和命名相同类型的 `type-import-on-demand` 声明(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.5.2[§7.5.2])，则效果就像该类型的静态成员类型一样(https://docs.oracle.com/javase/specs/jls/se11/html/jls-8.html#jls-8.5[§8.5], https://docs.oracle.com/javase/specs/jls/se11/html/jls-9.html#jls-9.5[§9.5])仅导入一次。
+
+
+
+
+== 7.6. Top Level Type Declarations
+顶级类型声明声明顶级类类型 (https://docs.oracle.com/javase/specs/jls/se11/html/jls-8.html[§8 (Classes)]) 或顶级接口类型(https://docs.oracle.com/javase/specs/jls/se11/html/jls-9.html[(§9 (Interfaces))])。
+====
+[source, java, indent=0]
+----
+TypeDeclaration:
+    ClassDeclaration
+    InterfaceDeclaration
+    ;
+----
+====
+
+额外的“;”出现在编译单元中类型声明级别的标记对编译单元的含义没有影响。
+在 Java 编程语言中，允许使用分号，这只是对 C 程序员的一种让步，因为 C 程序员习惯于在类声明之后放置“;”。
+它们不应该用在新的 Java 代码中。
+
+在没有访问修饰符的情况下，顶级类型具有包访问权限：只能在声明它的包的普通编译单元中访问它(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.6.1[§6.6.1])。
+
+可以将类型声明为 `public` 以从同一模块的其他包中的代码授予对该类型的访问权，并且可能从其他模块的包中的代码授予对该类型的访问权。
+
+*如果顶级类型声明包含以下任何一个访问修饰符：`protected`, `private` 或 `static`，则为编译时错误。*
+
+*如果顶级类型的名称显示为在同一个包中声明的任何其他顶级类或接口类型的名称，则为编译时错误。*
+
+顶级类型的作用域和阴影在 https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.3[§6.3] 和 https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.4[§6.4] 中规定。
+
+顶级类型的完全限定名称在 https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.7[§6.7] 中指定。
+
+====
+.Example 7.6-1. Conflicting Top Level Type Declarations
+======
+[source, java, indent=0]
+----
+package test;
+import java.util.Vector;
+class Point {
+    int x, y;
+}
+interface Point {  // compile-time error #1
+    int getR();
+    int getTheta();
+}
+class Vector { Point[] pts; }  // compile-time error #2
+----
+======
+这里，第一个编译时错误是由名称 `Point` 的重复声明引起的，它同时是同一个包中的类和接口。
+
+第二个编译时错误是尝试通过类类型声明和 `single-type-import` 声明来声明名称 `Vector` 。
+
+但是，请注意，如果类的名称还指定了一个类型，那么在包含类声明的编译单元 (https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.3[§7.3]) 中，通过 `type-import-on-demand` 声明(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.5.2[§7.5.2])就可以导入该类型，这并不是一个错误。
+======
+[source, java, indent=0]
+----
+package test;
+import java.util.*;
+class Vector {}  // not a compile-time error
+----
+======
+即使存在类 `java.util.Vector` ，也允许使用 `Vector` 类的声明。
+在这个编译单元中，简单名称 `Vector` 指的是类 `test.Vector` ，而不是 `java.util.Vector` （它仍然可以由编译单元中的代码引用，但仅由其完全限定名称引用）。
+====
+
+====
+.Example 7.6-2. Scope of Top Level Types
+======
+[source, java, indent=0]
+----
+package points;
+class Point {
+    int x, y;           // coordinates
+    PointColor color;   // color of this point
+    Point next;         // next point with this color
+    static int nPoints;
+}
+class PointColor {
+    Point first;        // first point with this color
+    PointColor(int color) { this.color = color; }
+    private int color;  // color components
+}
+----
+======
+该程序定义了两个在类成员声明中相互使用的类。
+因为类类型 `Point` 和 `PointColor` 在包 `points` 中具有所有类型声明，因为类类型 `Point` 和 `PointColor` 在包 `points` 中具有所有类型声明，包括当前编译单元中的所有那些，作为其作用域，该程序正确编译。
+也就是说，前向引用不是问题。
+====
+.Example 7.6-3. Fully Qualified Names
+====
+
+=====
+[source, java, indent=0]
+----
+class Point { int x, y; }
+----
+=====
+
+在此代码中，类 `Point` 在没有包声明的编译单元中声明，因此 `Point` 是其完全限定名，而在以下代码中：
+=====
+[source, java, indent=0]
+----
+package vista;
+class Point { int x, y; }
+----
+=====
+`Point` 类的完全限定名称是 `vista.Point`。（包名 `vista` 适合本地或个人使用；如果打算广泛分发包，最好给它一个唯一的包名(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.1[§6.1])。）
+====
+
+Java SE 平台的实现必须通过它们的封闭模块名称和它们的二进制名称(https://docs.oracle.com/javase/specs/jls/se11/html/jls-13.html#jls-13.1[§13.1])的组合来跟踪包中的类型。
+必须将多种命名类型的方法扩展为二进制名称，以确保将这些名称理解为引用相同的类型。
+====
+例如，如果编译单元包含 `single-type-import` 声明(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.5.1[§7.5.1])：
+======
+[source, java, indent=0]
+----
+import java.util.Vector;
+----
+======
+然后在该编译单元中，简单名称 `Vector` 和完全限定名称 `java.util.Vector` 引用相同的类型。
+====
+
+*当且仅当包存储在文件系统中时(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.2[§7.2])，
+如果在名称和扩展名(例如, `.java` 或 `.jav`)组成的文件中找不到类型，则主机系统可以选择执行编译时错误的限制。如果满足以下条件：*
+
+* 该类型由声明类型的包的其他普通编译单元中的代码引用。
+* 该类型被声明为 `public`（因此可以从其他包中的代码访问）。
+
+这种限制意味着每个编译单元最多只能有一个这样的类型。这种限制使Java编译器可以轻松地在包中找到命名类。
+在实践中，许多程序员选择将每个类或接口类型放在它自己的编译单元中，无论它是 `public` 还是由其他编译单元中的代码引用。
+
+======
+例如，`public` 类型 `wet.sprocket.Toad` 的源代码可以在 `wet/sprocket` 目录中的 `Toad.java` 文件中找到，相应的目标代码可以在同一目录中的 `Toad.class` 文件中找到。
+======
+
+
+== 7.7. Module Declarations
+模块声明指定新的命名模块。命名模块指定对其他模块的依赖性，以定义可用于其自己的代码的类和接口的范围；
+并指定导出或打开哪些包，以便填充可用于指定依赖于它的其他模块的类和接口的范围。
+
+`dependence` 是由 `requires` 指令表示的内容，与模块是否存在具有指令指定的名称无关。
+`dependence` 是由给定的 `requires` 指令通过解析（在 `java.lang.module` 包规范中描述）枚举的可观察模块。
+通常，Java 编程语言的规则对依赖性比依赖性更感兴趣。
+====
+[source, java, indent=0]
+----
+ModuleDeclaration:
+    {Annotation} [open] module Identifier {. Identifier} { {ModuleDirective} }
+----
+====
+
+模块声明引入了一个模块名称，可以在其他模块声明中使用它来表示模块之间的关系。
+模块名用一个或多个用.隔开的Java标识符(https://docs.oracle.com/javase/specs/jls/se11/html/jls-3.html#jls-3.8[§3.8])组成。
+
+有两种模块：普通模块和开放模块。对于模块外部的代码，模块的类型决定了对模块类型的访问性质以及这些类型的成员。
+
+普通模块，没有 `open` 修饰符，仅在编译时和运行时授予对显式导出的包中的类型的访问权。
+
+开放模块，有 `open` 修饰符，在编译时授予对仅显式导出的包中的类型的访问权限，但在运行时授予对其所有包中的类型的访问权限，就好像已导出所有包一样。
+
+对于模块外部的代码（不管模块是普通还是开放模块），在编译时或运行时授予模块导出包中的类型的访问权限是专门针对这些包中的 `public` 类型和 `protected` 类型，以及这些类型的 `public` 成员和 `protected` 成员(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.6[§6.6])。
+在编译时或运行时，不会在未导出的包中向类型或其成员授予访问权限。
+模块内的代码可以在编译时和运行时访问模块中所有包中的 `public` 和 `protected` 类型以及这些类型的 `public` 成员和 `protected` 成员。
+
+Java SE 平台与编译时访问和运行时访问不同，它通过 Core Reflection API (https://docs.oracle.com/javase/specs/jls/se11/html/jls-1.html#jls-1.4[§1.4])提供反射访问。
+普通模块仅对那些显式导出或显式打开（或两者）的包授予对类型的反射访问。
+一个开放模块允许对其所有包中的类型进行反射访问，就好像所有包都已打开一样。
+
+对于普通模块之外的代码，授予模块导出（而非打开）包中类型的反射访问特定于这些包中的 `public` 类型和 `protected` 类型，以及这些类型的 `public` 成员和 `protected` 成员。
+授予模块打开的包中的类型（无论是否导出）的反射访问属于这些包中的所有类型以及这些类型的所有成员。
+在未导出或打开的包中，不对类型或其成员授予反射访问权限。模块内的代码可以在模块的所有包中反射访问所有类型及其所有成员。
+
+对于开放模块之外的代码，授予模块打开的包中的类型（即模块中的所有包）的反射访问权限适用于这些包中的所有类型以及这些类型的所有成员。
+模块内的代码可以在模块的所有包中反射访问所有类型及其所有成员。
+
+模块声明的指令指定模块对其他模块的依赖性(via `requires`, https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.7.1[§7.7.1])，
+它提供给其他模块的包(via `exports` and `opens`, https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.7.2[§7.7.2])，
+它消耗的服务(via `uses`, https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.7.3[§7.7.3])，
+以及它提供的服务(via `provides`, https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.7.4[§7.7.4])。
+
+====
+[source, java, indent=0]
+----
+ModuleDirective:
+    requires {RequiresModifier} ModuleName ;
+    exports PackageName [to ModuleName {, ModuleName}] ;
+    opens PackageName [to ModuleName {, ModuleName}] ;
+    uses TypeName ;
+    provides TypeName with TypeName {, TypeName} ;
+RequiresModifier:
+    (one of)
+    transitive static
+----
+====
+
+当且仅当包存储在文件系统中时(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.2[§7.2])，
+如果在由 `module-info` 加上扩展名（例如 `.java` 或 `.jav`）组成的名称下的文件中找不到模块声明，则主机系统可以选择强制执行编译时错误的限制。
+====
+为了帮助理解，模块声明对其指令进行分组是习惯的，尽管不是必需的，因此与模块相关的 `requires` 指令在视觉上与 `export` 和 `opens` 指令有所不同，这些指令与包有关，以及来自于服务相关的 `uses` 和 `provides` 指令。
+例如：
+======
+[source, java, indent=0]
+----
+module com.example.foo {
+    requires com.example.foo.http;
+    requires java.logging;
+
+    requires transitive com.example.foo.network;
+
+    exports com.example.foo.bar;
+    exports com.example.foo.internal to com.example.foo.probe;
+
+    opens com.example.foo.quux;
+    opens com.example.foo.internal to com.example.foo.network,
+                                      com.example.foo.probe;
+
+    uses com.example.foo.spi.Intf;
+    provides com.example.foo.spi.Intf with com.example.foo.Impl;
+}
+----
+======
+如果模块打开，则可以避免使用 `opens` 指令：
+======
+[source, java, indent=0]
+----
+open module com.example.foo {
+    requires com.example.foo.http;
+    requires java.logging;
+
+    requires transitive com.example.foo.network;
+
+    exports com.example.foo.bar;
+    exports com.example.foo.internal to com.example.foo.probe;
+
+    uses com.example.foo.spi.Intf;
+    provides com.example.foo.spi.Intf with com.example.foo.Impl;
+}
+----
+======
+鼓励Java语言的开发工具高亮 `requires transitive` 指令和不限定 `exports` 指令，因为它们构成了模块的主要API。
+====
+
+
+=== 7.7.1. Dependences
+`requires` 指令指定当前模块具有依赖关系的模块的名称。
+
+*一个 `requires` 指令不能出现在 `java.base` 模块的声明中，否则会发生编译时错误，因为它是原始模块并且没有依赖关系(https://docs.oracle.com/javase/specs/jls/se11/html/jls-8.html#jls-8.1.4[§8.1.4])。*
+
+如果模块的声明不表示依赖于 `java.base` 模块，并且模块本身不是 `java.base`，那么该模块具有隐式声明的对 `java.base` 模块的依赖性。
+
+`requires` 关键字后面可以跟修饰符 `transitive`。这会导致任何 `requires` 当前模块的模块具有隐式声明的依赖于 `requires transitive` 指令指定的模块。
+
+`requires` 关键字后面可以跟修饰符 `static`。这指定依赖项虽然在编译时是强制的，但在运行时是可选的。
+
+如果模块的声明表示依赖于 `java.base` 模块，并且模块本身不是 `java.base`，那么如果在 `requires` 关键字后面出现修饰符则会出现编译时错误。
+
+*如果模块声明中的多个 `requires` 指令指定了相同的模块名称，那么这是一个编译时错误。*
+
+*如果 `java.lang.module` 包规范中描述的当前模块作为唯一根模块的解析，由于 `java.lang.module` 包规范中描述的任何原因而失败，则这是编译时错误。*
+
+例如，如果 `requires` 指令指定了一个不可观察的模块，或者当前模块直接或间接表示对自身的依赖。
+
+*如果解析成功，则其结果指定当前模块读取的模块。当前模块读取的模块确定当前模块可以看到哪些普通编译单元(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.3[§7.3])。
+在当前模块中的代码可以访问在那些普通编译单元（以及仅那些普通编译单元）中声明的类型。*
+
+Java SE 平台区分显式声明的命名模块（即使用模块声明）和隐式声明的命名模块（即自动模块）。
+但是，Java编程语言没有表现出这种区别：`requires` 指令引用命名模块，而不考虑它们是显式声明还是隐式声明。
+
+虽然自动模块便于迁移，但它们的名称和导出的包可能会在其作者将其转换为显式声明的模块时发生变化，因此它们不可靠。
+如果 `requires` 指令引用自动模块，则鼓励Java编译器发出警告。如果 `transitive` 修饰符出现在指令中，则建议使用特别强的警告。
+
+====
+.Example 7.1.1-1. Resolution of requires transitive directives
+假设有四个模块声明如下：
+======
+[source, java, indent=0]
+----
+module m.A {
+    requires m.B;
+}
+----
+======
+
+======
+[source, java, indent=0]
+----
+module m.B {
+    requires transitive m.C;
+}
+----
+======
+
+======
+[source, java, indent=0]
+----
+module m.C {
+    requires transitive m.D;
+}
+----
+======
+
+======
+[source, java, indent=0]
+----
+module m.D {
+    exports p;
+}
+
+----
+======
+`m.D` 导出的包 `p` 声明如下：
+======
+[source, java, indent=0]
+----
+package p;
+public class Point {}
+----
+======
+并且模块 `m.A` 中的包 `client` 引用导出包 `p` 中的 `public` 类型 `Point`：
+======
+[source, java, indent=0]
+----
+package client;
+import p.Point;
+public class Test {
+    public static void main(String[] args) {
+        System.out.println(new Point());
+    }
+}
+
+----
+======
+假设当前目录中每个模块有一个子目录，以它所包含的模块命名，则可以对模块进行如下编译:
+======
+[source, java, indent=0]
+----
+javac --module-source-path . -d . --module m.D
+javac --module-source-path . -d . --module m.C
+javac --module-source-path . -d . --module m.B
+javac --module-source-path . -d . --module m.A
+----
+======
+程序 `client.Test` 可以运行如下：
+======
+[source, java, indent=0]
+----
+java --module-path . --module m.A/client.Test
+----
+======
+从 `m.A` 中的代码到 `m.D` 中导出的 `public` 类型 `Point` 的引用是合法的，因为 `m.A` 读取 `m.D`，`m.D` 导出包含 `Point` 的包。
+分辨率确定 `m.A` 读取 `m.D` 如下：
+
+* `m.A` `requires` `m.B`，因此读取 `m.B`。
+* 由于 `m.A` 读取 `m.B`，并且由于 `m.B` `requires transitive` `m.C`，因此分辨率确定 `m.A` 读取 `m.C`。
+* 然后，由于 `m.A` 读取 `m.C`，并且由于 `m.C` `requires transitive` `m.D`，因此分辨率确定 `m.A` 读取 `m.D`。
+
+实际上，模块可以通过多个依赖级别读取另一个模块，以便支持任意数量的重构。
+一旦一个模块被发布供其他人重用（via `requires`），该模块的作者就会提交它的名称和API，但可以自由地将其内容重构到其他模块中，原始模块将这些模块重用（via `requires transitive`）以造福用户。
+在上述例子中，包 `p` 可能最初由 `m.B` 导出（thus, `m.A` `requires` `m.B`）但是重构导致 `m.B` 的一些内容移动到 `m.C` 和 `m.D`。
+通过使用一系列 `requires transitive` 指令，`m.B`、`m.C` 和 `m.D` 可以保留对 `m.A` 中代码的包 `p` 的访问，而不强制对 `m.A` 的 `requires` 指令进行任何更改。
+注意 `m.D` 中的包 `p` 不是由 `m.C` 和`m.B` “重新导出”的；相反，`m.A` 直接读 `m.D`。
+====
+
+
+=== 7.7.2. Exported and Opened Packages
+`exports` 指令指定当前模块要导出的包的名称。对于其他模块中的代码，这将在编译时和运行时授予对包中的 `public` 和 `protected` 类型以及这些类型的 `public` 成员和 `protected` 成员的访问权限(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.6[§6.6])。
+它还为其他模块中的代码授予对这些类型和成员的反射访问权限。
+
+`opens` 指令指定当前模块要打开的包的名称。对于其他模块中的代码，这将在运行时（而不是编译时）授予包中的 `public` 和 `protected` 类型以及这些类型的 `public` 和 `protected` 成员访问权。
+它还为其他模块中的代码授予对包中的所有类型及其所有成员的反射访问权限。
+
+*如果由 `exports` 指定的包未由与当前模块关联的编译单元(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.3[§7.3])声明，则这是编译时错误。*
+
+允许 `opens` 用于指定未由与当前模块关联的编译单元声明的包。（如果该包碰巧由与另一个模块相关联的可观察编译单元声明，则 `opens` 指令对另一个模块没有影响。）
+
+*如果模块声明中的多个 `exports` 指令指定相同的包名称，则为编译时错误。*
+
+*如果模块声明中的多个 `opens` 指令指定相同的包名称，则为编译时错误。*
+
+*如果一个 `opens` 指令出现在一个开放模块的声明中，这是一个编译时错误。*
+
+如果 `exports` 或 `opens` 指令有一个 `to` 子句，那么该指令是限定的；否则，它是不限定的。
+对于限定指令，包中的 `public` 类型和 `protected` 类型及其 `public` 成员和 `protected` 成员只能被 `to` 子句中指定的模块中的代码访问。
+`to` 子句中指定的模块称为当前模块的 `friends` 。对于不限定的指令，这些类型及其成员可以在任何模块中访问代码。
+
+允许 `export` 或 `opens` 指令的 `to` 子句指定不可观察的模块(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.7.6[§7.7.6])。
+
+*如果给定的 `exports` 指令的 `to` 子句多次指定相同的模块名称，则为编译时错误。*
+
+*如果给定的 `opens` 指令的 `to` 子句多次指定相同的模块名，那么这是一个编译时错误。*
+
+
+=== 7.7.3. Service Consumption
+`uses` 指令指定当前模块可以通过 `java.util.ServiceLoader` 发现提供者的服务。
+
+*该服务必须是类类型、接口类型或注解类型。如果 `uses` 指令指定枚举类型(https://docs.oracle.com/javase/specs/jls/se11/html/jls-8.html#jls-8.9[§8.9])作为服务，则为编译时错误。*
+
+*该服务可以在当前模块或另一个模块中声明。如果未在当前模块中声明该服务，则必须可以被当前模块中的代码访问(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.6[§6.6])，否则会发生编译时错误。*
+
+*如果模块声明中的多个 `uses` 指令指定了相同的服务，那么这是一个编译时错误。*
+
+
+
+=== 7.7.4. Service Provision
+`provides` 指令指定一个服务，其 `with` 子句为 `java.util.ServiceLoader` 指定一个或多个服务提供者。
+
+*该服务必须是类类型、接口类型或注解类型。如果 `provides` 指令将枚举类型(https://docs.oracle.com/javase/specs/jls/se11/html/jls-8.html#jls-8.9[§8.9])指定为服务，则为编译时错误。*
+
+*该服务可以在当前模块或另一个模块中声明。如果未在当前模块中声明服务，则必须可以被当前模块中的代码访问(https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.6[§6.6])，否则会发生编译时错误。*
+
+*每个服务提供者必须是类类型或接口类型，即 `public`、顶层的或嵌套的 `static` 的，否则将发生编译时错误。*
+
+*必须在当前模块中声明每个服务提供者，否则会发生编译时错误。*
+
+如果服务提供者显式声明无行参的 `public` 构造函数，或者隐式声明了 `public` 默认构造函数(https://docs.oracle.com/javase/specs/jls/se11/html/jls-8.html#jls-8.8.9[§8.8.9])，则该构造函数称为 `provider constructor`。
+
+如果服务提供者显式声明了一个名为 `provider` 的 `public static` 方法而没有行参，则该方法称为 `provider method`。
+
+*如果服务提供者有一个提供者方法，那么它的返回类型必须（i）在当前模块中声明，或者在另一个模块中声明并且可以访问当前模块中的代码; （ii）是 `provides` 指令指明的服务的子类型; 或发生编译时错误。*
+
+虽然必须在当前模块中声明由 `provides` 指令指定的服务提供者，但其提供者方法可能具有在另一个模块中声明的返回类型。另请注意，当服务提供者声明提供者方法时，服务提供者本身不必是服务的子类型。
+
+*如果服务提供者没有 `provider method`，则该服务提供者必须具有 `provider constructor`，并且必须是 `provides` 指令中指定的服务的子类型，否则会发生编译时错误。*
+
+*如果模块声明中的多个 `provides` 指令指定了相同的服务，那么这是一个编译时错误。*
+
+*如果给定的 `privides` 指令的 `with` 子句多次指定相同的服务提供者，则这是编译时错误。*
+
+
+
+
+=== 7.7.5. Unnamed Modules
+主机系统不与具名模块(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.3[§7.3])相关联的可观察的普通编译单元，是与未具名模块相关联的。
+
+Java SE平台提供了未命名的模块，因为Java SE 9之前开发的程序无法声明命名模块。此外，Java SE平台提供未命名包(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.4.2[§7.4.2])的原因主要适用于未命名的模块。
+
+Java SE平台的实现必须至少支持一个未命名的模块。实现可能支持多个未命名的模块，但不是必须这样做。哪些普通编译单元与每个未命名模块相关联由主机系统确定。
+
+主机系统可以将命名包中的普通编译单元与未命名模块相关联。
+
+未命名模块的规则旨在最大化与命名模块的互操作，如下所示：
+
+* 未命名的模块读取每个可观察的模块(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.7.6[§7.7.6])。 +
+由于可以观察到与未命名模块相关联的普通编译单元，所以可以观察到相关联的未命名模块。
+因此，如果Java SE平台的实现支持多个未命名的模块，则每个未命名的模块都是可观察的；每个未命名的模块读取包含其自身的每个未命名模块。每个未命名的模块读取包含其自身的每个未命名模块。 +
+但是，重要的是要意识到未命名模块的普通编译单元对命名模块(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.3[§7.3])永远不可见，因为没有 `requires` 指令可以安排命名模块读取未命名的模块。
+Java SE平台的Core Reflection API可用于安排命名模块在运行时读取未命名的模块。
+* 未命名的模块导出其普通编译单元与该未命名模块关联的每个包。
+* 未命名的模块打开每个包，其普通编译单元与该未命名的模块相关联。
+
+
+
+
+=== 7.7.6. Observability of a Module
+如果至少满足下列条件之一，则可以观察到模块：
+
+* 包含模块声明的模块化编译单元是可观察的(https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html#jls-7.3[§7.3])。
+* 可观察到与该模块相关联的普通编译单元。
+
+
+
+
+'''
+原文地址footnoteref:['', https://docs.oracle.com/javase/specs/jls/se11/html/jls-7.html]
+
+

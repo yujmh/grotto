@@ -1,0 +1,21 @@
+= MySQL 5.7 Reference Manual
+Cheng Cheng;
+:doctype: book
+:revdate: {docdate}
+:sectanchors:
+:xrefstyle: full
+:anchor:
+//:source-highlighter: highlightjs
+:source-highlighter: coderay
+:toc: left
+:toclevels: 5
+:sectnumlevels: 6
+:docinfo:
+
+//include::pr.asciidoc[]
+
+:numbered:
+include::optimization.asciidoc[]
+
+include::functions.asciidoc[]
+

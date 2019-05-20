@@ -1,0 +1,41 @@
+= Thymeleaf
+cc;
+:doctype: book
+:icons: font
+:source-highlighter: highlightjs
+:toc: left
+:toclevels: 4
+:sectlinks:
+
+
+
+*Thymeleaf* 是适用于Web和独立环境的现代服务器端Java模板引擎。
+
+Thymeleaf 的主要目标是为您的开发工作流程带来优雅的自然模板 —— 可以在浏览器中正确显示的 HTML，也可以作为静态原型使用，从而在开发团队中实现更强大的协作。
+
+借助 Spring Framework 的模块，与您喜爱的工具的大量集成，以及插入您自己的功能的能力，Thymeleaf 是现代 HTML5 JVM Web 开发的理想选择 —— 尽管它可以做更多的事情。
+
+
+[[natural-templates]]
+== Natural templates
+用 Thymeleaf 编写的 HTML 模板看起来和 HTML 一样工作，让在您的应用程序中运行的实际模板继续作为有用的设计工件。
+
+====
+[source, html]
+----
+<table>
+  <thead>
+    <tr>
+      <th th:text="#{msgs.headers.name}">Name</th>
+      <th th:text="#{msgs.headers.price}">Price</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr th:each="prod: ${allProducts}">
+      <td th:text="${prod.name}">Oranges</td>
+      <td th:text="${#numbers.formatDecimal(prod.price, 1, 2)}">0.99</td>
+    </tr>
+  </tbody>
+</table>
+----
+====

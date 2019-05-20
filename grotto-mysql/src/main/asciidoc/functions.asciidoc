@@ -1,0 +1,111 @@
+
+[[functions]]
+== Functions and Operators
+
+
+
+
+[[group-by-functions]]
+=== Aggregate ( `GROUP BY` ) Function Descriptions
+本节介绍对值集合进行操作的组（聚合）函数。
+
+.Table 12.26 Aggregate (GROUP BY) Functions
+[cols="2*", options="header"]
+|===
+|Name
+|Description
+
+|https://dev.mysql.com/doc/refman/5.7/en/group-by-functions.html#function_avg[AVG()]
+|Return the average value of the argument
+
+|https://dev.mysql.com/doc/refman/5.7/en/group-by-functions.html#function_bit-and[BIT_AND()]
+|Return bitwise AND
+
+|https://dev.mysql.com/doc/refman/5.7/en/group-by-functions.html#function_bit-or[BIT_OR()]
+|Return bitwise OR
+
+|https://dev.mysql.com/doc/refman/5.7/en/group-by-functions.html#function_bit-xor[BIT_XOR()]
+|Return bitwise XOR
+
+|<<function_count, COUNT()>>
+|Return a count of the number of rows returned
+
+|<<function_count-distinct, COUNT(DISTINCT)>>
+|Return the count of a number of different values
+
+|https://dev.mysql.com/doc/refman/5.7/en/group-by-functions.html#function_group-concat[GROUP_CONCAT()]
+|Return a concatenated string
+
+|https://dev.mysql.com/doc/refman/5.7/en/group-by-functions.html#function_json-arrayagg[JSON_ARRAYAGG()]
+|Return result set as a single JSON array
+
+|https://dev.mysql.com/doc/refman/5.7/en/group-by-functions.html#function_json-objectagg[JSON_OBJECTAGG()]
+|Return result set as a single JSON object
+
+|
+|Return the maximum value
+
+|
+|Return the minimum value
+|===
+
+[[function_count]]
+* <<function_count, COUNT(expr)>>
++
+返回 https://dev.mysql.com/doc/refman/5.7/en/select.html[SELECT] 语句检索的行中expr的非NULL值的计数。
+结果是 https://dev.mysql.com/doc/refman/5.7/en/integer-types.html[BIGINT] 值。
++
+如果没有匹配的行， https://dev.mysql.com/doc/refman/5.7/en/group-by-functions.html#function_count[COUNT()] 将返回0。
++
+====
+[source, SQL]
+----
+mysql> SELECT student.student_name,COUNT(*)
+       FROM student,course
+       WHERE student.student_id=course.student_id
+       GROUP BY student_name;
+----
+====
++
+https://dev.mysql.com/doc/refman/5.7/en/group-by-functions.html#function_count[COUNT(*)] 有些不同，它返回检索的行数的计数，无论它们是否包含 `NULL` 值。
++
+对于诸如 `InnoDB` 之类的事务存储引擎，存储精确的行数是有问题的。多个事务可能同时发生，每个事务都可能影响计数。
++
+`InnoDB` 不保留表中的内部行数，因为并发事务可能同时“看到”不同数量的行。因此，`SELECT COUNT(*)` 语句只计算当前事务可见的行。
++
+在MySQL 5.7.18之前，`InnoDB` 通过扫描聚集索引来处理 `SELECT COUNT(\*)` 语句。 从MySQL 5.7.18开始，`InnoDB` 通过遍历最小的可用辅助索引来处理 `SELECT COUNT(*)` 语句，除非索引或优化器提示指示优化器使用不同的索引。
+如果没有辅助索引，则扫描聚集索引。
++
+如果索引记录不完​​全在缓冲池中，则处理 `SELECT COUNT(*)` 语句需要一些时间。为了更快地计算，请创建一个计数器表，让应用程序根据插入和删除更新它。
+但是，在数千个并发事务正在启动对同一计数器表的更新的情况下，此方法可能无法很好地扩展。如果大致的行数可以满足，请使用 https://dev.mysql.com/doc/refman/5.7/en/show-table-status.html[SHOW TABLE STATUS]。
++
+`InnoDB` 以相同的方式处理 `SELECT COUNT(*)` 和 `SELECT COUNT(1)` 操作。没有性能差异。
++
+对于 `MyISAM` 表，如果 https://dev.mysql.com/doc/refman/5.7/en/select.html[SELECT] 从一个表检索，没有检索到其他列，并且没有 `WHERE` 子句，则 https://dev.mysql.com/doc/refman/5.7/en/group-by-functions.html#function_count[COUNT(*)] 被优化为非常快速地返回。例如：
++
+====
+[source, SQL]
+----
+mysql> SELECT COUNT(*) FROM student;
+----
+====
++
+此优化仅适用于 `MyISAM` 表，因为为此存储引擎存储了精确的行数，并且可以非常快速地访问。如果第一列定义为 `NOT NULL` ，则 `COUNT(1)` 仅受相同的优化。
+
+
+[[function_count-distinct]]
+* <<function_count-distinct, COUNT(DISTINCT expr,[expr...])>>
++
+返回具有不同非NULL `expr` 值的行数。
++
+如果没有匹配的行，则 https://dev.mysql.com/doc/refman/5.7/en/group-by-functions.html#function_count[COUNT(DISTINCT)] 返回0。
++
+====
+[source, sql]
+----
+mysql> SELECT COUNT(DISTINCT results) FROM student;
+----
+====
++
+在MySQL中，您可以通过提供的表达式列表来获取不包含 `NULL` 的不同表达式组合的数量。
+在标准SQL中，您必须对 `COUNT(DISTINCT ...)` 中的所有表达式进行连接。

@@ -1,0 +1,1130 @@
+
+[[optimization]]
+== Optimization
+本章介绍如何优化 MySQL 性能并提供示例。优化涉及在多个级别配置、调整和测量性能。
+根据您的工作角色（开发人员、DBA或两者的组合），您可以在单个SQL语句、整个应用程序、单个数据库服务器或多个联网数据库服务器的级别进行优化。
+有时您可以主动并提前计划性能，而有时您可能会在出现问题后解决配置或代码问题。
+优化CPU和内存使用还可以提高可伸缩性，允许数据库处理更多负载而不会降低速度。
+
+[[optimization-overview]]
+=== Optimization Overview
+数据库性能取决于数据库级别的多个因素，例如表、查询和配置设置。这些软件构造导致硬件级别的CPU和I/O操作，
+您必须最小化并尽可能地高效。在处理数据库性能时，首先要学习软件方面的高级规则和指南，并使用挂钟时间来衡量性能。
+当您成为专家时，您将了解内部发生的更多信息，并开始测量诸如CPU周期和I/O操作之类的事情。
+
+典型用户的目标是从现有的软件和硬件配置中获得最佳的数据库性能。
+高级用户寻找改进MySQL软件本身的机会，或者开发自己的存储引擎和硬件设备来扩展MySQL生态系统。
+
+- <<optimizing-db-level, Optimizing at the Database Level>>
+- <<optimizing-hardware-level, Optimizing at the Hardware Level>>
+- <<balancing-portability-performance, Balancing Portability and Performance>>
+
+[[optimizing-db-level]]
+==== Optimizing at the Database Level
+使数据库应用程序快速的最重要的因素是它的基本设计：
+
+- 表结构合理吗？特别是，列是否具有正确的数据类型，并且每个表是否具有适合工作类型的列？例如，执行频繁更新的应用程序通常有多个表但列很少，而分析大量数据的应用程序通常只有几个表但列很多。
+- 是否有适当的 https://dev.mysql.com/doc/refman/5.7/en/optimization-indexes.html[索引] 来提高查询效率？
+- 您是否为每个表使用适当的存储引擎，并利用您使用的每个存储引擎的优势和功能？特别是，诸如 https://dev.mysql.com/doc/refman/5.7/en/optimizing-innodb.html[InnoDB] 之类的事务存储引擎或诸如 https://dev.mysql.com/doc/refman/5.7/en/optimizing-myisam.html[MyISAM] 之类的非事务性存储引擎的选择对于性能和可伸缩性非常重要。
+====
+NOTE: `InnoDB` 是新表的默认存储引擎。实际上，先进的 `InnoDB` 性能特征意味着 `InnoDB` 表通常优于更简单的 `MyISAM` 表，尤其是对于繁忙的数据库。
+====
+- 每个表是否使用适当的行格式？此选择还取决于用于表的存储引擎。特别是，压缩表使用较少的磁盘空间，因此读取和写入数据所需的磁盘 I/O 也越少。压缩适用于 `InnoDB` 表的所有类型的工作负载，以及只读的 `MyISAM` 表。
+- 应用程序是否使用适当的 https://dev.mysql.com/doc/refman/5.7/en/locking-issues.html[锁定策略]？
+例如，通过允许可能的共享访问，以便数据库操作可以并发运行，并在适当时请求独占访问，以便关键操作成为最高优先级。同样，存储引擎的选择也很重要。
+`InnoDB` 存储引擎可以处理大多数锁定问题而无需您的参与，从而可以在数据库中实现更好的并发性，并减少代码的实验和调优。
+- 所有 https://dev.mysql.com/doc/refman/5.7/en/buffering-caching.html[用于缓存的内存区域] 大小正确吗？
+也就是说，足够大以容纳频繁访问的数据，但不能太大以至于它们会超载物理内存并导致分页。
+要配置的主要内存区域是 `InnoDB` 的 buffer pool、`MyISAM` 的 key cache 和MySQL查询缓存。
+
+[[optimizing-hardware-level]]
+==== Optimizing at the Hardware Level
+随着数据库变得越来越繁忙，任何数据库应用程序最终都会达到硬件限制。
+DBA必须评估是否可以调整应用程序或重新配置服务器以避免这些 https://dev.mysql.com/doc/refman/5.7/en/glossary.html#glos_bottleneck[(bottleneck)瓶颈]，或者是否需要更多硬件资源。系统瓶颈通常来自这些来源：
+
+- 磁盘寻道。磁盘需要一段时间才能找到一块数据。对于现代磁盘，平均时间通常低于10毫秒，所以我们在理论上1秒可以做大约100次寻道。这个时间用新磁盘慢慢改善，并且很难针对单个表进行优化。优化寻道时间的方法是将数据分配到多个磁盘上。
+- 磁盘读写。当磁盘位于正确位置时，我们需要读取或写入数据。使用现代磁盘，一个磁盘可提供至少10-20MB/s的吞吐量。这比寻道更容易优化，因为您可以从多个磁盘并行读取。
+- CPU周期。当数据在主内存中时，我们必须处理它以获得我们的结果。与内存量相比具有大表是最常见的限制因素。但是使用小表，速度通常不是问题。
+- 内存带宽。当CPU需要的数据量超过CPU缓存容量时，主内存带宽成为瓶颈。对于大多数系统来说，这是一个不常见的瓶颈，但是需要注意。
+
+[[balancing-portability-performance]]
+==== Balancing Portability and Performance
+要在可移植的MySQL程序中使用面向性能的SQL扩展，你可以在 /*! */ 注释分隔符中包含特定于MySQL的关键字。其他SQL服务器忽略注释的关键字。
+有关编写注释的信息，请参见 https://dev.mysql.com/doc/refman/5.7/en/comments.html[Section 9.6, “Comment Syntax”]。
+
+
+
+// --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+=== Optimizing SQL Statements
+数据库应用程序的核心逻辑是通过SQL语句执行的，无论是直接通过解释器发出还是通过API在幕后提交。
+本节中的调整准则有助于加速各种MySQL应用程序。这些准则涵盖了读取和写入数据的SQL操作，一般SQL操作的幕后开销，以及特定方案（如数据库监视）中使用的操作。
+
+
+==== Optimizing `SELECT` Statements
+https://dev.mysql.com/doc/refman/5.7/en/select.html[SELECT] 语句形式的查询执行数据库中的所有查找操作。
+调优这些语句是首要任务，无论是为动态网页实现亚秒响应时间，还是为了产生巨大的隔夜报告而缩短工时。
+
+除 https://dev.mysql.com/doc/refman/5.7/en/select.html[SELECT] 语句外，查询的调优技术也适用于构造 https://dev.mysql.com/doc/refman/5.7/en/create-table-select.html[ CREATE TABLE...AS SELECT]、https://dev.mysql.com/doc/refman/5.7/en/insert-select.html[https://dev.mysql.com/doc/refman/5.7/en/insert-select.html]，
+以及 https://dev.mysql.com/doc/refman/5.7/en/delete.html[DELETE] 语句中的 `WHERE` 子句。这些语句具有额外的性能考虑因素，因为它们将写操作与面向读取的查询操作相结合。
+
+NDB Cluster支持连接下推优化，从而将合格连接完整地发送到NDB Cluster数据节点，在NDB Cluster数据节点中，它可以在它们之间分布并且并行执行。
+有关此优化的更多信息，请参阅 https://dev.mysql.com/doc/refman/5.7/en/mysql-cluster-options-variables.html#ndb_join_pushdown-conditions[Conditions for NDB pushdown joins]，
+
+优化查询的主要考虑因素是：
+
+- 要使一个慢 `SELECT ... WHERE` 查询变快，首先要检查的是是否可以添加 https://dev.mysql.com/doc/refman/5.7/en/glossary.html#glos_index[index]。
+在 `WHERE` 子句中使用的列上设置索引，以加快评估、过滤和结果的最终检索。为避免浪费磁盘空间，请构建一小组索引，以加速应用程序中使用的许多相关查询。
++
+索引对于引用不同表的查询尤其重要，使用 https://dev.mysql.com/doc/refman/5.7/en/glossary.html#glos_join[joins] 和 https://dev.mysql.com/doc/refman/5.7/en/glossary.html#glos_foreign_key[foreign keys] 等功能。
+您可以使用 https://dev.mysql.com/doc/refman/5.7/en/explain.html[EXPLAIN] 语句来确定哪些索引用于 https://dev.mysql.com/doc/refman/5.7/en/select.html[SELECT]。
+请参见 https://dev.mysql.com/doc/refman/5.7/en/mysql-indexes.html[Section 8.3.1, “How MySQL Uses Indexes”] 和 https://dev.mysql.com/doc/refman/5.7/en/using-explain.html[Section 8.8.1, “Optimizing Queries with EXPLAIN”]。
+- 隔离和调优查询的任何部分，例如花费过多时间的函数调用。根据查询的结构，可以对结果集中的每一行调用一次函数，甚至可以对表中的每一行调用一次函数，这大大提高了效率。
+- 最大限度地减少查询中的 https://dev.mysql.com/doc/refman/5.7/en/glossary.html#glos_full_table_scan[全表扫描] 数，尤其是对于大表。
+- 通过定期使用 https://dev.mysql.com/doc/refman/5.7/en/analyze-table.html[ANALYZE TABLE] 语句使表统计信息保持最新，因此优化程序具有构建高效执行计划所需的信息。
+- 了解特定于每个表的存储引擎的调优技术、索引技术和配置参数。`InnoDB` 和 `MyISAM` 都有一套指导方针，可以在查询中实现和维持高性能。
+有关详细信息，请参见 https://dev.mysql.com/doc/refman/5.7/en/optimizing-innodb-queries.html[Section 8.5.6, “Optimizing InnoDB Queries”] 和 https://dev.mysql.com/doc/refman/5.7/en/optimizing-queries-myisam.html[Section 8.6.1, “Optimizing MyISAM Queries”]。
+- 您可以使用 https://dev.mysql.com/doc/refman/5.7/en/innodb-performance-ro-txn.html[Section 8.5.3, “Optimizing InnoDB Read-Only Transactions”] 中的技术优化 `InnoDB` 表的单查询事务。
+- 避免以难以理解的方式转换查询，尤其是在优化程序自动执行某些相同转换的情况下。
+- 如果其中一个基本准则无法轻松解决性能问题，请通过阅读 https://dev.mysql.com/doc/refman/5.7/en/explain.html[EXPLAIN] 计划并调整索引、 `WHERE` 子句、连接子句等来调查特定查询的内部详细信息。（当您达到一定的专业水平时，阅读 https://dev.mysql.com/doc/refman/5.7/en/explain.html[EXPLAIN] 计划可能是您每次查询的第一步。）
+- 调整MySQL用于缓存的内存区域的大小和属性。通过有效使用 `InnoDB` https://dev.mysql.com/doc/refman/5.7/en/glossary.html#glos_buffer_pool[buffer pool] 、`MyISAM` key cache 和 MySQL 查询缓存，重复查询运行得更快，因为在第二次及以后的时间内从内存中检索结果。
+- 即使对于使用高速缓存内存区域快速运行的查询，您仍可以进一步优化，以便它们需要更少的高速缓存，从而使您的应用程序更具可伸缩性。可伸缩性意味着您的应用程序可以处理更多的并发用户、更大的请求等，而不会出现性能大幅下降的情况。
+- 处理锁定问题，其中查询的速度可能会受到同时访问表的其他会话的影响。
+
+
+===== `WHERE` Clause Optimization
+本节讨论可以为处理 `WHERE` 子句进行的优化。这些示例使用 https://dev.mysql.com/doc/refman/5.7/en/select.html[SELECT] 语句，
+但相同的优化适用于 https://dev.mysql.com/doc/refman/5.7/en/delete.html[DELETE] 和 https://dev.mysql.com/doc/refman/5.7/en/update.html[UPDATE] 语句中的 `WHERE` 子句。
+
+[NOTE]
+====
+由于MySQL优化器的工作仍在进行中，所以这里并没有记录MySQL执行的所有优化。
+====
+
+您可能想要重写查询以更快地进行算术运算，然而牺牲了可读性。因为MySQL会自动执行类似的优化，所以通常可以避免这种工作，并使查询保持更易理解和可维护的形式。
+MySQL执行的一些优化如下：
+
+* 删除不必要的括号：
+====
+[source, sql, indent=0]
+----
+   ((a AND b) AND c OR (((a AND b) AND (c AND d))))
+-> (a AND b AND c) OR (a AND b AND c AND d)
+----
+====
+* 常量合并：
+====
+[source, sql]
+----
+   (a<b AND b=c) AND a=5
+-> b>5 AND b=c AND a=5
+----
+====
+* 常数条件删除：
+====
+[source, sql]
+----
+   (b>=5 AND b=5) OR (b=6 AND 5=5) OR (b=7 AND 5=6)
+-> b=5 OR b=6
+----
+====
+* 索引使用的常量表达式仅计算一次。
+* 在没有 `WHERE` 的单个表上的 https://dev.mysql.com/doc/refman/5.7/en/group-by-functions.html#function_count[COUNT(*)] 直接从 `MyISAM` 和 `MEMORY` 表的表信息中检索。
+当仅与一个表一起使用时，也可以对任何 `NOT NULL` 表达式执行此操作。
+* 早期检测无效常量表达式。MySQL快速检测到某些 https://dev.mysql.com/doc/refman/5.7/en/select.html[SELECT] 语句是不可能的，并且不返回任何行。
+* 如果不使用 `GROUP BY` 或聚合函数（ https://dev.mysql.com/doc/refman/5.7/en/group-by-functions.html#function_count[COUNT()]、 https://dev.mysql.com/doc/refman/5.7/en/group-by-functions.html#function_min[MIN()] 等等），`HAVING` 将与 `WHERE` 合并。
+* 对于连接中的每个表，构造一个更简单的 `WHERE` 以获得对表的快速 `WHERE` 评估，并且还尽快跳过行。
+
+* 在查询中的任何其他表之前首先读取所有常量表。常量表是以下任何一种：
+** 一张空表或只有一行数据的表。
+** 与 `PRIMARY KEY` 或 `UNIQUE` 索引上的 `WHERE` 子句一起使用的表，其中所有索引部分都与常量表达式进行比较并定义为 `NOT NULL`。 +
++
+以下所有表都用作常量表：
+====
+[source, sql]
+----
+SELECT * FROM t WHERE primary_key=1;
+SELECT * FROM t1,t2
+  WHERE t1.primary_key=1 AND t2.primary_key=t1.id;
+----
+====
+
+* 连接表的最佳连接组合是通过尝试所有可能性找到的。如果 `ORDER BY` 和 `GROUP BY` 子句中的所有列都来自同一个表，则在连接时首选该表。
+* 如果存在 `ORDER BY` 子句和不同的 `GROUP BY` 子句，或者如果 `ORDER BY` 或 `GROUP BY` 包含连接队列中第一个表以外的表中的列，则会创建临时表。
+* 如果使用 `SQL_SMALL_RESULT` 修饰符，MySQL将使用内存中的临时表。
+* 查询每个表索引，并使用最佳索引，除非优化器认为使用表扫描更有效。曾经，使用扫描是基于最佳索引是否跨越表的30%，但是固定的百分比不再决定是使用索引还是扫描。
+优化器现在更复杂，并且基于其他因素（例如表大小、行数和I/O块大小）进行估算。
+* 在某些情况下，MySQL甚至不需要查询数据文件就可以从索引中读取行。如果索引中使用的所有列都是数字，则仅使用索引树来解析查询。
+* 在输出每一行之前，将跳过与 `HAVING` 子句不匹配的行。
+
+一些非常快的查询示例：
+====
+[source, SQL]
+----
+SELECT COUNT(*) FROM tbl_name;
+
+SELECT MIN(key_part1),MAX(key_part1) FROM tbl_name;
+
+SELECT MAX(key_part2) FROM tbl_name
+  WHERE key_part1=constant;
+
+SELECT ... FROM tbl_name
+  ORDER BY key_part1,key_part2,... LIMIT 10;
+
+SELECT ... FROM tbl_name
+  ORDER BY key_part1 DESC, key_part2 DESC, ... LIMIT 10;
+----
+====
+
+MySQL仅使用索引树解析以下查询，假设索引列是数字：
+====
+[source, SQL]
+----
+SELECT key_part1,key_part2 FROM tbl_name WHERE key_part1=val;
+
+SELECT COUNT(*) FROM tbl_name
+  WHERE key_part1=val1 AND key_part2=val2;
+
+SELECT key_part2 FROM tbl_name GROUP BY key_part1;
+----
+====
+
+以下查询使用索引来按排序顺序检索行，而不使用单独的排序传递：
+====
+[source, SQL]
+----
+SELECT ... FROM tbl_name
+  ORDER BY key_part1,key_part2,... ;
+
+SELECT ... FROM tbl_name
+  ORDER BY key_part1 DESC, key_part2 DESC, ... ;
+----
+====
+
+
+
+
+
+[[range-optimization]]
+===== Range Optimization
+https://dev.mysql.com/doc/refman/5.7/en/explain-output.html#jointype_range[range] 访问方法使用单个索引来检索包含在一个或多个索引值间隔内的表行的子集。它可用于单部分或多部分索引。
+以下部分描述了优化程序使用范围访问的条件。
+
+* <<range-access-single-part, Range Access Method for Single-Part Indexes>>
+* <<range-access-multi-part, Range Access Method for Multiple-Part Indexes>>
+* <<equality-range-optimization, Equality Range Optimization of Many-Valued Comparisons>>
+* <<row-constructor-range-optimization, Range Optimization of Row Constructor Expressions>>
+* <<range-optimization-memory-use, Limiting Memory Use for Range Optimization>>
+
+
+[[range-access-single-part]]
+*Range Access Method for Single-Part Indexes* +
+对于单部分索引，索引值间隔可以通过 `WHERE` 子句中的相应条件方便地表示，表示为范围条件而不是“间隔”。
+
+单部分索引的范围条件的定义如下：
+
+* 对于 `BTREE` 和 `HASH` 索引，当使用 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_equal[=],
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_equal-to[<=>],
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#function_in[IN()],
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_is-null[IS NULL] 或
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_is-not-null[IS NOT NULL] 运算符时，key部分与常量值的比较是范围条件。
+* 此外，对于 `BTREE` 索引，当使用 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_greater-than[>]、
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_less-than[<]、
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_greater-than-or-equal[>=]、
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_less-than-or-equal[\<=]、
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_between[BETWEEN]、
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_not-equal[!=]或
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_not-equal[<>]操作符，
+或 https://dev.mysql.com/doc/refman/5.7/en/string-comparison-functions.html#operator_like[LIKE] 操作中到 https://dev.mysql.com/doc/refman/5.7/en/string-comparison-functions.html#operator_like[LIKE] 的参数是一个不以通配符开头的常量字符串时，key部分和常量值的比较是一个范围条件。
+* 对于所有索引类型，多个范围条件与 https://dev.mysql.com/doc/refman/5.7/en/logical-operators.html#operator_or[OR] 或 https://dev.mysql.com/doc/refman/5.7/en/logical-operators.html#operator_and[AND] 组合形成范围条件。
+
+前面描述中的“常量值”表示以下之一：
+
+* 来自查询字符串的常量
+* 来自同一连接的 https://dev.mysql.com/doc/refman/5.7/en/explain-output.html#jointype_const[const]或 https://dev.mysql.com/doc/refman/5.7/en/explain-output.html#jointype_system[system]表的列
+* 不相关子查询的结果
+* 任何表达式完全由前面类型的子表达式组成
+
+以下是 `WHERE` 子句中具有范围条件的查询的一些示例：
+====
+[source, sql]
+----
+SELECT * FROM t1
+  WHERE key_col > 1
+  AND key_col < 10;
+
+SELECT * FROM t1
+  WHERE key_col = 1
+  OR key_col IN (15,18,20);
+
+SELECT * FROM t1
+  WHERE key_col LIKE 'ab%'
+  OR key_col BETWEEN 'bar' AND 'foo';
+----
+====
+
+在优化器常量传播阶段，一些非常量值可以转换为常量。
+
+MySQL尝试从每个可能索引的 `WHERE` 子句中提取范围条件。在提取过程中，丢弃不能用于构建范围条件的条件，组合产生重叠范围的条件，并且去除产生空范围的条件。
+
+参考以下语句，其中 `key1` 是索引列，`nonkey` 是非索引列：
+====
+[source, sql]
+----
+SELECT * FROM t1 WHERE
+  (key1 < 'abc' AND (key1 LIKE 'abcde%' OR key1 LIKE '%b')) OR
+  (key1 < 'bar' AND nonkey = 4) OR
+  (key1 < 'uux' AND key1 > 'z');
+----
+====
+
+键 `key1` 的提取如下：
+[start=1]
+. 从原始的 `WHERE` 子句开始：
++
+====
+[source, sql]
+----
+(key1 < 'abc' AND (key1 LIKE 'abcde%' OR key1 LIKE '%b')) OR
+(key1 < 'bar' AND nonkey = 4) OR
+(key1 < 'uux' AND key1 > 'z')
+----
+====
+. 删除 `nonkey = 4` 和 `key1 LIKE'%b'`，因为它们不能用于范围扫描。删除它们的正确方法是用 `TRUE` 替换它们，这样我们在进行范围扫描时不会错过任何匹配的行。用 `TRUE` 替换它们会产生：
++
+====
+[source, sql]
+----
+(key1 < 'abc' AND (key1 LIKE 'abcde%' OR TRUE)) OR
+(key1 < 'bar' AND TRUE) OR
+(key1 < 'uux' AND key1 > 'z')
+----
+====
+. 折叠条件始终为真或假：
++
+    * `(key1 LIKE 'abcde%' OR TRUE)` 始终为 true
+    * `(key1 < 'uux' AND key1 > 'z')` 始终为 false
++
+用常量替换这些条件会产生：
++
+====
+[source, sql]
+----
+(key1 < 'abc' AND TRUE) OR (key1 < 'bar' AND TRUE) OR (FALSE)
+----
+====
++
+删除不必要的 `TRUE` 和 `FALSE` 常量会产生：
++
+====
+[source, sql]
+----
+(key1 < 'abc') OR (key1 < 'bar')
+----
+====
+. 将重叠间隔组合成一个会产生用于范围扫描的最终条件：
++
+====
+[source, sql]
+----
+(key1 < 'bar')
+----
+====
+
+通常（并且如前面的示例所示），用于范围扫描的条件比 `WHERE` 子句的限制性更小。MySQL执行额外的检查以过滤掉满足范围条件但不满足完整 `WHERE` 子句的行。
+
+范围条件提取算法可以处理任意深度的嵌套 `AND/OR` 结构，其输出不依赖于条件在 `WHERE` 子句中出现的顺序。
+
+MySQL 不支持为空间索引的范围访问方法合并多个范围。要解决此限制，可以使用具有相同 https://dev.mysql.com/doc/refman/5.7/en/select.html[SELECT] 语句的 https://dev.mysql.com/doc/refman/5.7/en/union.html[UNION]，但将每个空间谓词放在不同的 https://dev.mysql.com/doc/refman/5.7/en/select.html[SELECT]中除外。
+
+
+[[range-access-multi-part]]
+*Range Access Method for Multiple-Part Indexes* +
+多部分索引的范围条件是单部分索引的范围条件的扩展。多部分索引上的范围条件将索引行限制在一个或多个键元组间隔内。使用索引中的排序在一组键元组上定义键元组间隔。
+
+例如，考虑定义为 key1(*_key_part1_*, *_key_part2_*, *_key_part3_*) 的多部分索引，以及按键顺序列出的以下一组键元组：
+====
+[source, sql]
+----
+key_part1  key_part2  key_part3
+  NULL       1          'abc'
+  NULL       1          'xyz'
+  NULL       2          'foo'
+   1         1          'abc'
+   1         1          'xyz'
+   1         2          'abc'
+   2         1          'aaa'
+----
+====
+
+条件 *_key_part1_* = 1 定义此间隔：
+====
+[source, sql]
+----
+(1,-inf,-inf) <= (key_part1,key_part2,key_part3) < (1,+inf,+inf)
+----
+====
+
+间隔覆盖前面数据集中的第4、第5和第6个元组，并且可以由范围访问方法使用。
+
+相反，条件 *_key_part3_* ='abc' 不定义单个间隔，并且不能由范围访问方法使用。
+
+以下描述更详细地说明了范围条件如何适用于多部分索引。
+
+* 对于 `HASH` 索引，可以使用包含相同值的每个间隔。这意味着只能为以下形式的条件生成间隔：
++
+====
+[source, sql]
+----
+    key_part1 cmp const1
+AND key_part2 cmp const2
+AND ...
+AND key_partN cmp constN;
+----
+====
++
+这里，`const1`, `const2`, ... 是常量， `cmp` 是 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_equal[=], https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_equal-to[<=>] 或 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_is-null[IS NULL] 比较运算符之一，条件涵盖所有索引部分。
+（也就是说，有 *N* 个条件，*N*-part 索引的每个部分都有一个条件。）例如，以下是三部分 `HASH` 索引的范围条件：
++
+====
+[source, sql]
+----
+key_part1 = 1 AND key_part2 IS NULL AND key_part3 = 'foo'
+----
+====
++
+对于被认为是常数的定义，请查看 https://dev.mysql.com/doc/refman/5.7/en/range-optimization.html#range-access-single-part[Range Access Method for Single-Part Indexes]。
+* 对于 `BTREE` 索引，与 https://dev.mysql.com/doc/refman/5.7/en/logical-operators.html#operator_and[AND] 结合的条件间隔是可用的，其中每个条件使用
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_equal[=], https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_equal-to[\<\=>], https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_is-null[IS NULL],
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_is-null[>], https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_less-than[<], https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_greater-than-or-equal[>=],
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_less-than-or-equal[\<=],
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_not-equal[!=], https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_not-equal[<>],
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_not-equal[BETWEEN], https://dev.mysql.com/doc/refman/5.7/en/string-comparison-functions.html#operator_like[LIKE 'pattern']（其中 `pattern` 不以通配符开头）。
+可以使用区间，只要可以确定包含与条件匹配的所有行的单个键元组（或者如果使用 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_not-equal[<>] 或 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_not-equal[!=] 则为两个间隔）。
++
+只要比较运算符为 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_equal[=], https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_equal-to[\<\=>] 或 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_is-null[IS NULL]，优化程序就会尝试使用其他键部分来确定间隔。
+如果运算符是 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_greater-than[>], https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_less-than[<], https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_greater-than-or-equal[>=],
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_less-than-or-equal[\<=], https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_not-equal[!=],
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_not-equal[<>], https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_between[BETWEEN] 或 https://dev.mysql.com/doc/refman/5.7/en/string-comparison-functions.html#operator_like[LIKE]，优化程序将使用它，但不再考虑键部分。
+对于以下表达式，优化程序使用来自第一次比较的 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_equal[=]。它还使用了来自第二次比较的 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_greater-than-or-equal[>=]，但没有考虑其他键部分，也没有使用第三个比较进行间隔构造：
++
+====
+[source, sql]
+----
+key_part1 = 'foo' AND key_part2 >= 10 AND key_part3 > 10
+----
+====
++
+单个间隔是：
++
+====
+[source, sql]
+----
+('foo',10,-inf) < (key_part1,key_part2,key_part3) < ('foo',+inf,+inf)
+----
+====
++
+创建的区间可能包含比初始条件更多的行。例如，前面的区间包括值 `('foo', 11, 0)`，它不满足原始条件。
+* 如果覆盖区间中包含的行集的条件与 https://dev.mysql.com/doc/refman/5.7/en/logical-operators.html#operator_or[OR] 组合，则它们形成一个条件，该条件覆盖其区间的并集中包含的一组行。
+如果条件与 https://dev.mysql.com/doc/refman/5.7/en/logical-operators.html#operator_and[AND] 组合，则它们形成一个条件，该条件覆盖其区间的交集中包含的一组行。
+例如，对于在两部分索引上的这个条件：
++
+====
+[source, sql]
+----
+(key_part1 = 1 AND key_part2 < 2) OR (key_part1 > 5)
+----
+====
++
+区间是：
++
+====
+[source, sql]
+----
+(1,-inf) < (key_part1,key_part2) < (1,2)
+(5,-inf) < (key_part1,key_part2)
+----
+====
++
+在此示例中，第一行的区间使用左边界的一个键部分和右边界的两个键部分。第二行的区间仅使用一个键部分。
+`EXPLAIN` 输出的 `key_len` 列指示使用的密钥前缀的最大长度。
++
+在某些情况下， `key_len` 可能表示使用了一个键部分，但这可能不是您所期望的。假设 `key_part1` 和 `key_part2` 可以为 `NULL`。
+然后 `key_len` 列显示以下条件的两个键部分长度：
++
+====
+[source, sql]
+----
+key_part1 >= 1 AND key_part2 < 2
+----
+====
++
+但是，事实上条件转换为：
++
+====
+[source, sql]
+----
+key_part1 >= 1 AND key_part2 IS NOT NULL
+----
+====
++
+有关如何执行优化以组合或消除单部分索引上的范围条件的间隔的说明，请参阅 https://dev.mysql.com/doc/refman/5.7/en/range-optimization.html#range-access-single-part[Range Access Method for Single-Part Indexes]。
+对多部分索引的范围条件执行类似步骤。
++
+
+
+[[equality-range-optimization]]
+*Equality Range Optimization of Many-Valued Comparisons* +
+考虑这些表达式，其中 `col_name` 是索引列：
+====
+[source, sql]
+----
+col_name IN(val1, ..., valN)
+col_name = val1 OR ... OR col_name = valN
+----
+====
+如果 `col_name` 等于多个值中的任何一个，则每个表达式都为 true。这些比较是等式范围比较（其中“范围”是单个值）。优化程序估计读取限定行的成本以进行相等范围比较，如下所示：
+
+* 如果 `col_name` 上有唯一索引，则每个范围的行估计值为1，因为最多一行可以具有给定值。
+* 否则，`col_name` 上的任何索引都是非唯一的，并且优化程序可以使用潜入索引或索引统计信息来估计每个范围的行数。
+
+使用 index dives 时，优化程序会在范围的每一端进行潜入，并使用范围中的行数作为估计值。例如，表达式 `col_name IN(10,20,30)` 有三个相等范围，优化程序每个范围进行两次潜入以生成行估计。每对潜入产生具有给定值的行数的估计。
+
+index dives 提供准确的行估计，但随着表达式中比较值的数量增加，优化程序需要更长时间才能生成行估计。index statistics 的使用不如 index dives 准确，但允许对大值列表进行更快的行估计。
+
+https://dev.mysql.com/doc/refman/5.7/en/server-system-variables.html#sysvar_eq_range_index_dive_limit[eq_range_index_dive_limit] 系统变量使您可以配置优化程序从一个行估计策略切换到另一个行估计策略的值的数量。
+要允许使用 index dives 进行最多N个相等范围的比较，请将 https://dev.mysql.com/doc/refman/5.7/en/server-system-variables.html#sysvar_eq_range_index_dive_limit[eq_range_index_dive_limit] 设置为N + 1。
+要禁用统计信息并始终使用 index dives 而不考虑N，请将 https://dev.mysql.com/doc/refman/5.7/en/server-system-variables.html#sysvar_eq_range_index_dive_limit[eq_range_index_dive_limit] 设置为0。
+
+更新表 index statistics 以获得最佳估计值，请使用 https://dev.mysql.com/doc/refman/5.7/en/analyze-table.html[ANALYZE TABLE]。
+
+即使在以其他方式使用 index dives 的情况下，也会跳过满足所有这些条件的查询：
+
+* 存在单索引 `FORCE INDEX` 索引提示。其思想是，如果索引使用是强制的，那么执行索引跳转的额外开销不会带来任何好处。
+* 索引是非唯一的，并且不是 `FULLTEXT` 索引。
+* 没有子查询。
+* 不存在 `DISTINCT`, `GROUP BY`, `ORDER BY` 子句。
+
+这些 dive-skipping 条件仅适用于单表查询。对于多表查询（连接） index dives 是不会跳过的。
+
+
+[[row-constructor-range-optimization]]
+*Range Optimization of Row Constructor Expressions* +
+优化器能够将范围扫描访问方法应用于此表单的查询：
+====
+[source, sql]
+----
+SELECT ... FROM t1 WHERE ( col_1, col_2 ) IN (( 'a', 'b' ), ( 'c', 'd' ));
+----
+====
+以前，对于要使用的范围扫描，必须将查询写成：
+====
+[source, sql]
+----
+SELECT ... FROM t1 WHERE ( col_1 = 'a' AND col_2 = 'b' )
+OR ( col_1 = 'c' AND col_2 = 'd' );
+----
+====
+
+要使优化器使用范围扫描，查询必须满足以下条件：
+
+* 仅使用 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#function_in[IN()] ， 而不是 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#function_not-in[NOT IN()]
+* 在 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#function_in[IN()] 的左侧，行构造器仅包含列引用
+* 在 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#function_in[IN()] 的右侧，行构造函数仅包含运行时常量，这些常量是在执行期间被绑定到常量的文字或本地列引用。
+* 在 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#function_in[IN()] 的右侧，有多个行构造函数。
+
+有关优化程序和行构造函数的更多信息，请查看 https://dev.mysql.com/doc/refman/5.7/en/row-constructor-optimization.html[Section 8.2.1.19, “Row Constructor Expression Optimization”]
+
+
+
+
+[[range-optimization-memory-use]]
+*Limiting Memory Use for Range Optimization* +
+要控制 range 优化程序可用的内存，请使用 https://dev.mysql.com/doc/refman/5.7/en/server-system-variables.html#sysvar_range_optimizer_max_mem_size[range_optimizer_max_mem_size] 系统变量：
+
+* 0 表示无限制。
+* 值大于0时，优化程序会在考虑 range 访问方法时跟踪内存的消耗。如果要超过指定的限制，则放弃范围访问方法，并考虑其他方法，包括全表扫描。这可能不太理想。如果发生这种情况，则会发生以下警告（其中 *N* 是当前的 https://dev.mysql.com/doc/refman/5.7/en/server-system-variables.html#sysvar_range_optimizer_max_mem_size[range_optimizer_max_mem_size] 值）：
++
+====
+[source, sql]
+----
+Warning    3170    Memory capacity of N bytes for
+                   'range_optimizer_max_mem_size' exceeded. Range
+                   optimization was not done for this query.
+----
+====
+* 对于 https://dev.mysql.com/doc/refman/5.7/en/update.html[UPDATE] 和 https://dev.mysql.com/doc/refman/5.7/en/delete.html[DELETE] 语句，如果优化器回退到全表扫描并且启用了 https://dev.mysql.com/doc/refman/5.7/en/delete.html[sql_safe_updates] 系统变量，则会发生错误而不是警告，因为实际上没有使用任何键来确定要修改的行。
+有关更多信息，请参见 https://dev.mysql.com/doc/refman/5.7/en/mysql-tips.html#safe-updates[Section 4.5.1.6.4, “Using Safe-Updates Mode (--safe-updates)”]。
+
+对于超出可用 range 优化内存并且优化程序回退到不太理想的计划的单个查询，增加 https://dev.mysql.com/doc/refman/5.7/en/server-system-variables.html#sysvar_range_optimizer_max_mem_size[range_optimizer_max_mem_size] 值可以提高性能。
+
+要估计处理 range 表达式所需的内存量，请使用以下准则：
+
+* 对于诸如以下的简单查询，其中有一个候选键用于范围访问方法，每个谓词与 https://dev.mysql.com/doc/refman/5.7/en/logical-operators.html#operator_or[OR] 组合使用大约230个字节：
++
+====
+[source, sql]
+----
+SELECT COUNT(*) FROM t
+WHERE a=1 OR a=2 OR a=3 OR .. . a=N;
+----
+====
+* 类似地，对于诸如以下的查询，每个与 https://dev.mysql.com/doc/refman/5.7/en/logical-operators.html#operator_and[AND] 组合的谓词使用大约125个字节：
++
+====
+[source, sql]
+----
+SELECT COUNT(*) FROM t
+WHERE a=1 AND b=1 AND c=1 ... N;
+----
+====
+* 对于使用 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#function_in[IN()] 谓词的查询：
++
+====
+[source, sql]
+----
+SELECT COUNT(*) FROM t
+WHERE a IN (1,2, ..., M) AND b IN (1,2, ..., N);
+----
+====
++
+https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#function_in[IN()] 列表中的每个文字值都计为与 https://dev.mysql.com/doc/refman/5.7/en/logical-operators.html#operator_or[OR] 结合的谓词。
+如果有两个 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#function_in[IN()] 列表，则与 https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#function_in[OR] 组合的谓词数是每个列表中文字值数的乘积。
+因此，在前一种情况下与 https://dev.mysql.com/doc/refman/5.7/en/logical-operators.html#operator_or[OR] 组合的谓词数是 `M×N` 。
+
+在5.7.11之前，每个谓词与 https://dev.mysql.com/doc/refman/5.7/en/logical-operators.html#operator_or[OR] 组合的字节数更高，大约700字节。
+
+
+
+[[index-merge-optimization]]
+===== Index Merge Optimization
+索引合并访问方法检索具有多个 https://dev.mysql.com/doc/refman/5.7/en/explain-output.html#jointype_range[range] 扫描的行，并将其结果合并为一个。此访问方法仅合并来自单个表的索引扫描，而不是跨多个表扫描。
+合并可以生成其基础扫描的并集、交集或交集的并集。
+
+可以使用Index Merge的示例查询：
+====
+[source, sql]
+----
+SELECT * FROM tbl_name WHERE key1 = 10 OR key2 = 20;
+
+SELECT * FROM tbl_name
+  WHERE (key1 = 10 OR key2 = 20) AND non_key = 30;
+
+SELECT * FROM t1, t2
+  WHERE (t1.key1 IN (1,2) OR t1.key2 LIKE 'value%')
+  AND t2.key1 = t1.some_col;
+
+SELECT * FROM t1, t2
+  WHERE t1.key1 = 1
+  AND (t2.key1 = t1.some_col OR t2.key2 = t1.some_col2);
+----
+====
+
+[NOTE]
+====
+索引合并优化算法具有以下已知限制：
+
+* 如果您的查询具有带有深度 AND/OR 嵌套的复杂 `WHERE` 子句，并且MySQL未选择最佳计划，请尝试使用以下身份转换来分发术语：
++
+======
+[source, sql]
+----
+(x AND y) OR z => (x OR z) AND (y OR z)
+(x OR y) AND z => (x AND z) OR (y AND z)
+----
+======
+* 索引合并不适用于 full-text 索引。
+====
+
+在 https://dev.mysql.com/doc/refman/5.7/en/explain.html[EXPLAIN] 输出中，索引合并方法在 `type` 列中显示为 https://dev.mysql.com/doc/refman/5.7/en/explain-output.html#jointype_index_merge[index_merge]。
+在这种情况下，`key` 列包含使用的索引列表，`key_len` 包含这些索引的最长 key 部分列表。
+
+index merge 访问方法有几个算法，它们显示在 https://dev.mysql.com/doc/refman/5.7/en/explain.html[EXPLAIN] 输出的 `Extra` 字段中：
+
+* Using intersect(...)
+* Using union(...)
+* Using sort_union(...)
+
+以下部分更详细地描述了这些算法。优化器根据各种可用选项的成本估算在不同的索引合并算法和其他访问方法之间进行选择。
+
+索引合并的使用取决于 https://dev.mysql.com/doc/refman/5.7/en/server-system-variables.html#sysvar_optimizer_switch[optimizer_switch] 系统变量的 `index_merge`、`index_merge_intersection`、`index_merge_union` 和 `index_merge_sort_union` 标志的值。
+请查看 https://dev.mysql.com/doc/refman/5.7/en/switchable-optimizations.html[Section 8.9.3, “Switchable Optimizations”]。默认情况下，这些标志都是 `on`。
+要仅启用某些算法，请将 `index_merge` 设置为 `off`，并仅启用应允许的其他算法。
+
+* <<index-merge-intersection, Index Merge Intersection Access Algorithm>>
+* <<index-merge-union, Index Merge Union Access Algorithm>>
+* <<index-merge-sort-union, Index Merge Sort-Union Access Algorithm>>
+
+
+[[index-merge-intersection]]
+*Index Merge Intersection Access Algorithm* +
+当 `WHERE` 子句在与 https://dev.mysql.com/doc/refman/5.7/en/logical-operators.html#operator_and[AND] 组合的不同键上转换为多个 range 条件时，此访问算法适用，并且每个条件是以下之一：
+
+* 这种形式的 *_N_*-part 表达式，其中索引具有正好 *_N_* 个部分（即，所有索引部分都被覆盖）：
++
+====
+[source, sql]
+----
+key_part1 = const1 AND key_part2 = const2 ... AND key_partN = constN
+----
+====
+* `InnoDB` 表的主键上的任何 range 条件。
+
+例子：  &nbsp;
+====
+[source, sql]
+----
+SELECT * FROM innodb_table
+  WHERE primary_key < 10 AND key_col1 = 20;
+
+SELECT * FROM tbl_name
+  WHERE key1_part1 = 1 AND key1_part2 = 2 AND key2 = 2;
+----
+====
+
+索引合并交集算法对所有使用的索引执行同步扫描，并生成从合并索引扫描接收到的行序列的交集。
+
+如果查询中使用的所有列都被使用的索引覆盖，则不会检索完整的表行（在这种情况下， https://dev.mysql.com/doc/refman/5.7/en/explain.html[EXPLAIN] 输出的 `Extra` 字段中包含 `Using index`）。
+以下是此类查询的示例：
+====
+[source, sql]
+----
+SELECT COUNT(*) FROM t1 WHERE key1 = 1 AND key2 = 1;
+----
+====
+
+如果使用的索引未涵盖查询中使用的所有列，则仅在满足所有使用的键的范围条件时才检索完整行。
+
+如果其中一个合并条件是 `InnoDB` 表的主键上的条件，则它不用于行检索，而是用于过滤掉使用其他条件检索的行。
+
+
+
+
+[[index-merge-union]]
+*Index Merge Union Access Algorithm* +
+该算法的标准类似于索引合并交集算法的标准。当表的 `WHERE` 子句在与 https://dev.mysql.com/doc/refman/5.7/en/logical-operators.html#operator_or[OR] 结合的不同键上转换为多个范围条件时，该算法适用，并且每个条件是以下之一：
+
+* 这种形式的 *_N_*-part 表达式，其中索引正好具有 *_N_* 个部分（即，所有索引部分都被覆盖）：
++
+====
+[source, sql]
+----
+key_part1 = const1 AND key_part2 = const2 ... AND key_partN = constN
+----
+====
+* `InnoDB` 表的主键上的任何范围条件。
+* 索引合并交集算法适用的条件。
+
+例子：
+
+====
+[source, sql]
+----
+SELECT * FROM t1
+  WHERE key1 = 1 OR key2 = 2 OR key3 = 3;
+
+SELECT * FROM innodb_table
+  WHERE (key1 = 1 AND key2 = 2)
+     OR (key3 = 'foo' AND key4 = 'bar') AND key5 = 5;
+----
+====
+
+
+[[index-merge-sort-union]]
+*Index Merge Sort-Union Access Algorithm* +
+当 `WHERE` 子句转换为由 https://dev.mysql.com/doc/refman/5.7/en/logical-operators.html#operator_or[OR] 组合的多个 range 条件时，此访问算法适用，但索引合并并集算法不适用。
+
+例子：
+
+====
+[source, sql]
+----
+SELECT * FROM tbl_name
+  WHERE key_col1 < 10 OR key_col2 < 20;
+
+SELECT * FROM tbl_name
+  WHERE (key_col1 > 10 OR key_col2 = 20) AND nonkey_col = 30;
+----
+====
+sort-union 算法和 union 算法之间的区别在于 sort-union 算法必须首先获取所有行的行 ID，然后在返回任何行之前对它们进行排序。
+
+
+
+[[index-condition-pushdown-optimization]]
+===== Index Condition Pushdown Optimization
+Index Condition Pushdown (ICP) 是对MySQL使用索引从表中检索行的情况的优化。如果没有ICP，存储引擎会遍历索引以查找基表中的行，并将它们返回给MySQL服务器，该服务器会评估行的 `WHERE` 条件。
+
+
+
+
+
+[[is-null-optimization]]
+===== `IS NULL` Optimization
+MySQL 可以对 *_col_name_* https://dev.mysql.com/doc/refman/8.0/en/comparison-operators.html#operator_is-null[IS NULL] 执行相同的优化，它可以用于 *_col_name_* = *_constant_value_*。
+例如，MySQL可以使用index和range来搜索带有 https://dev.mysql.com/doc/refman/8.0/en/comparison-operators.html#operator_is-null[IS NULL] 的 `NULL`。
+
+例子：
+
+====
+[source, sql]
+----
+SELECT * FROM tbl_name WHERE key_col IS NULL;
+
+SELECT * FROM tbl_name WHERE key_col <=> NULL;
+
+SELECT * FROM tbl_name
+  WHERE key_col=const1 OR key_col=const2 OR key_col IS NULL;
+----
+====
+
+如果 `WHERE` 子句包含声明为 `NOT NULL` 的列的 *_col_name_* https://dev.mysql.com/doc/refman/8.0/en/comparison-operators.html#operator_is-null[IS NULL] 条件，则该表达式将被优化掉。
+在列可能仍然产生 `NULL` 的情况下不会发生这种优化；例如，如果它来自 `LEFT JOIN` 右侧的表。
+
+MySQL还可以优化组合 *_col_name_* = *_expr_* OR *_col_name_* `IS NULL`，这是一种在已解析的子查询中很常见的形式。使用此优化时， https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 显示 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_ref_or_null[ref_or_null]。
+
+此优化可以为任何 key 部分处理一个 https://dev.mysql.com/doc/refman/8.0/en/comparison-operators.html#operator_is-null[IS NULL]。
+
+假设表 `t2` 的列 `a` 和 `b` 上有索引，优化的查询的一些示例：
+====
+[source, sql]
+----
+SELECT * FROM t1 WHERE t1.a=expr OR t1.a IS NULL;
+
+SELECT * FROM t1, t2 WHERE t1.a=t2.a OR t2.a IS NULL;
+
+SELECT * FROM t1, t2
+  WHERE (t1.a=t2.a OR t2.a IS NULL) AND t2.b=t1.b;
+
+SELECT * FROM t1, t2
+  WHERE t1.a=t2.a AND (t2.b=t1.b OR t2.b IS NULL);
+
+SELECT * FROM t1, t2
+  WHERE (t1.a=t2.a AND t2.a IS NULL AND ...)
+  OR (t1.a=t2.a AND t2.a IS NULL AND ...);
+----
+====
+https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_ref_or_null[ref_or_null] 的工作原理是首先对引用键执行读操作，然后单独搜索具有 `NULL` 键值的行。
+
+优化只能处理一个 https://dev.mysql.com/doc/refman/8.0/en/comparison-operators.html#operator_is-null[IS NULL] 级别。在以下查询中，MySQL 仅在表达式 `(t1.a=t2.a AND t2.a IS NULL)` 使用键查找，并且无法使用 `b` 上的 key 部分。
+
+
+
+
+
+// --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+[[execution-plan-information]]
+=== Understanding the Query Execution Plan
+根据表、列、索引和 `WHERE` 子句中的条件的详细信息，MySQL优化器会考虑许多技术来有效地执行SQ​​L查询中涉及的查找。可以在不读取所有行的情况下执行对大表的查询；可以在不比较每个行组合的情况下执行涉及多个表的连接。
+优化程序选择执行最有效查询的操作集称为“查询执行计划”，也称为 https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 计划。
+您的目标是识别 https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 计划中表明查询已经过优化的方面，并了解SQL语法和索引技术，以便在看到一些低效的操作时改进计划。
+
+
+
+[[using-explain]]
+==== Optimizing Queries with EXPLAIN
+https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 语句提供有关MySQL如何执行语句的信息：
+
+* https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 适用于 https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT]、 https://dev.mysql.com/doc/refman/8.0/en/delete.html[DELETE]、 https://dev.mysql.com/doc/refman/8.0/en/insert.html[INSERT]、 https://dev.mysql.com/doc/refman/8.0/en/replace.html[REPLACE] 和 https://dev.mysql.com/doc/refman/8.0/en/update.html[UPDATE] 语句。
+* 当 https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 与可解释的语句一起使用时，MySQL会显示优化器中有关语句执行计划的信息。也就是说，MySQL解释了它将如何处理语句，包括有关如何连接表以及以何种顺序连接的信息。有关使用EXPLAIN获取执行计划信息的信息，请参见 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html[Section 8.8.2, “EXPLAIN Output Format”]。
+* 当 https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 与 `FOR CONNECTION` *_connection_id_* 一起使用而不是可解释语句时，它将显示在命名连接中执行的语句的执行计划。请查看 https://dev.mysql.com/doc/refman/8.0/en/explain-for-connection.html[Section 8.8.4, “Obtaining Execution Plan Information for a Named Connection”]。
+* 对于 https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT] 语句， https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 会生成可以使用 https://dev.mysql.com/doc/refman/8.0/en/show-warnings.html[SHOW WARNINGS] 显示的其他执行计划信息。请查看 https://dev.mysql.com/doc/refman/8.0/en/explain-extended.html[Section 8.8.3, “Extended EXPLAIN Output Format”]。
+* https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 对于检查涉及分区表的查询很有用。请查看 https://dev.mysql.com/doc/refman/8.0/en/partitioning-info.html[Section 23.3.5, “Obtaining Information About Partitions”]。
+* `FORMAT` 选项可用于选择输出格式。 `TRADITIONAL` 以表格格式显示输出。如果不存在 `FORMAT` 选项，则这是默认值。`JSON` 格式以JSON格式显示信息。
+
+在 https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 的帮助下，您可以看到应该向表添加索引的位置，以便通过使用索引查找行来更快地执行语句。您还可以使用 https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 来检查优化器是否以最佳顺序连接表。
+要提示优化器使用与 https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT] 语句中命名表的顺序相对应的连接顺序，请使用 `SELECT STRAIGHT_JOIN` 而不仅仅是 https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT] 来开始语句。(See https://dev.mysql.com/doc/refman/8.0/en/select.html[Section 13.2.10, “SELECT Syntax”].)
+但是，`STRAIGHT_JOIN` 可能会阻止使用索引，因为它会禁用半连接转换。请参阅 https://dev.mysql.com/doc/refman/8.0/en/semi-joins.html[Section 8.2.2.1, “Optimizing Subqueries, Derived Tables, View References, and Common Table Expressions with Semi-Join Transformations”]。
+
+optimizer跟踪有时可以提供与 https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 的信息互补的信息。但是，优化程序跟踪格式和内容可能会在不同版本之间发生变化。
+有关详情，请参阅 https://dev.mysql.com/doc/refman/8.0/en/analyze-table.html[Section 13.7.3.1, “ANALYZE TABLE Syntax”]。
+
+[NOTE]
+.Note
+https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 还可用于获取有关表中列的信息。 https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN *_tbl_name_*] 与 `DESCRIBE` *_tbl_name_* 和 `SHOW COLUMNS FROM` *_tbl_name_* 同义。
+更多信息，请查看 https://dev.mysql.com/doc/refman/8.0/en/describe.html[Section 13.8.1, “DESCRIBE Syntax”] 和 https://dev.mysql.com/doc/refman/8.0/en/show-columns.html[Section 13.7.6.5, “SHOW COLUMNS Syntax”]。
+
+
+
+
+[[explain-output]]
+==== EXPLAIN Output Format
+https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 语句提供有关MySQL如何执行语句的信息。
+https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 适用于 https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT]、 https://dev.mysql.com/doc/refman/8.0/en/delete.html[DELETE]、 https://dev.mysql.com/doc/refman/8.0/en/insert.html[INSERT]、 https://dev.mysql.com/doc/refman/8.0/en/replace.html[REPLACE] 和 https://dev.mysql.com/doc/refman/8.0/en/update.html[UPDATE] 语句。
+
+https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 为 https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT] 语句中使用的每个表返回一行信息。它按照MySQL处理语句时读取它们的顺序在输出中列出表。
+MySQL 使用嵌套循环连接方法解析所有连接。这意味着MySQL从第一个表中读取一行，然后在第二个表、第三个表中找到匹配的行，依此类推。处理完所有表后，MySQL将通过表列表输出所选列和回溯，直到找到有更多匹配行的表。从该表中读取下一行，并继续下一个表。
+
+[NOTE]
+.Note
+MySQL Workbench具有Visual Explain功能，可以直观地显示 https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 输出。请查看 https://dev.mysql.com/doc/workbench/en/wb-tutorial-visual-explain-dbt3.html[Tutorial: Using Explain to Improve Query Performance]。
+
+* <<explain-output-columns, EXPLAIN Output Columns>>
+* <<explain-join-types, EXPLAIN Join Types>>
+* <<explain-extra-information, EXPLAIN Extra Information>>
+* <<explain-output-interpretation, EXPLAIN Output Interpretation>>
+
+
+[[explain-output-columns]]
+*EXPLAIN Output Columns* +
+本节介绍 https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 生成的输出列。随后的章节提供有关 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain-join-types[type] 和 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain-extra-information[Extra] 列的信息。
+
+https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 的每个输出行都提供有关一个表的信息。在 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain-output-column-table[Table 8.1, “EXPLAIN Output Columns”] 中每行包含值的概述，并在表格后面更详细的描述。
+列名显示在表的第一列中；第二列提供使用 `FORMAT = JSON` 时输出中显示的等效属性名称。
+
+.Table 8.1 EXPLAIN Output Columns
+[cols="3*", options="header"]
+|===
+|Column
+|JSON Name
+|Meaning
+
+|https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain_id[id]
+|select_id
+|The SELECT identifier
+
+|https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain_select_type[select_type]
+|None
+|The SELECT type
+
+|https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain_table[table]
+|table_name
+|The table for the output row
+
+|https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain_partitions[partitions]
+|partitions
+|The matching partitions
+
+|https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain_type[type]
+|access_type
+|The join type
+
+|https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain_possible_keys[possible_keys]
+|possible_keys
+|The possible indexes to choose
+
+|https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain_key[key]
+|key
+|The index actually chosen
+
+|https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain_key_len[key_len]
+|key_length
+|The length of the chosen key
+
+|https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain_ref[ref]
+|ref
+|The columns compared to the index
+
+|https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain_rows[rows]
+|rows
+|Estimate of rows to be examined
+
+|https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain_filtered[filtered]
+|filtered
+|Percentage of rows filtered by table condition
+
+|https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain_extra[Extra]
+|None
+|Additional information
+|===
+
+[NOTE]
+.Note
+在 JSON 格式的 `EXPLAIN` 输出中不显示 `NULL` 的 JSON 属性。
+
+* `id` (JSON name: `select_id`) +
+https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT] 标识符。这是查询中 https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT] 的序列号。如果行引用其他行的并集结果，则该值可以为 `NULL`。
+在这种情况下，`table` 列显示一个形如 `<union M,N>` 的值，以指明该行引用了 `id` 值为 *_M_* 和 *_N_* 的行的并集。
+* `select_type` (JSON name: none) +
+https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT] 类型，可以是下表中显示的任何一种。JSON格式的 `EXPLAIN` 将 `SELECT` 显示为 `query_block` 的属性，除非它是 `SIMPLE` 或 `PRIMARY`。JSON名称（如果适用）也显示在表中。
++
+[cols="3*", options="header"]
+|===
+|`select_type` Value
+|JSON Name
+|Meaning
+
+|SIMPLE
+|None
+|Simple https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT] (not using https://dev.mysql.com/doc/refman/8.0/en/union.html[UNION] or subqueries)
+
+|PRIMARY
+|None
+|Outermost https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT]
+
+|https://dev.mysql.com/doc/refman/8.0/en/union.html[UNION]
+|None
+|Second or later https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT] statement in a https://dev.mysql.com/doc/refman/8.0/en/union.html[UNION]
+
+|DEPENDENT UNION
+|`dependent (true)`
+|Second or later https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT] statement in a https://dev.mysql.com/doc/refman/8.0/en/union.html[UNION], dependent on outer query
+
+|UNION RESULT
+|`union_result`
+|Result of a https://dev.mysql.com/doc/refman/8.0/en/union.html[UNION].
+
+|https://dev.mysql.com/doc/refman/8.0/en/optimizer-hints.html#optimizer-hints-subquery[SUBQUERY]
+|None
+|First https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT] in subquery
+
+|DEPENDENT SUBQUERY
+|`dependent (true)`
+|First https://dev.mysql.com/doc/refman/8.0/en/select.html[SELECT] in subquery, dependent on outer query
+
+|DERIVED
+|None
+|Derived table
+
+|DEPENDENT DERIVED
+|`dependent (true)`
+|Derived table dependent on another table
+
+|MATERIALIZED
+|`materialized_from_subquery`
+|Materialized subquery
+
+|UNCACHEABLE SUBQUERY
+|`cacheable (false)`
+|A subquery for which the result cannot be cached and must be re-evaluated for each row of the outer query
+
+|UNCACHEABLE UNION
+|`cacheable (false)`
+|The second or later select in a https://dev.mysql.com/doc/refman/8.0/en/union.html[UNION] that belongs to an uncacheable subquery (see `UNCACHEABLE SUBQUERY`)
+|===
++
+`DEPENDENT` 通常表示使用相关子查询。请查看 https://dev.mysql.com/doc/refman/8.0/en/correlated-subqueries.html[Section 13.2.11.7, “Correlated Subqueries”]。
++
+`DEPENDENT SUBQUERY` 评估与 `UNCACHEABLE SUBQUERY` 评估不同。对于 `DEPENDENT SUBQUERY`，子查询仅针对来自其外部上下文的变量的每组不同值重新评估一次。对于 `UNCACHEABLE SUBQUERY`，将为外部上下文的每一行重新评估子查询。
++
+使用 `EXPLAIN` 指定 `FORMAT=JSON` 时，输出没有直接等同于 `select_type` 的单个属性； `query_block` 属性对应于给定的 `SELECT`。
+可以使用与刚显示的大多数 `SELECT` 子查询类型等效的属性（一个例子是 `MATERIALIZED` 的 `materialized_from_subquery `），并在适当时显示。对于 `SIMPLE` 或 `PRIMARY`，没有对应的JSON。
++
+非 `SELECT` 语句的 `select_type` 值展示受影响表的语句类型。例如，对于 https://dev.mysql.com/doc/refman/8.0/en/delete.html[DELETE] 语句， `select_type` 是 `DELETE`。
+* `table` (JSON name: `table_name`) +
+输出行应用的表名。这也可以是以下值之一：
+** `<unionM,N>`：`id` 值为 *_M_* 和 *_N_* 的并集。
+** `<derivedN>`：引用 `id` 值为 *_N_* 的行的派生表结果。例如，派生表可能来自 `FROM` 子句中的子查询。
+** 该行指的是 `id` 值为 *_N_* 的行的具体化子查询的结果。请查看 https://dev.mysql.com/doc/refman/5.7/en/subquery-materialization.html[ Section 8.2.2.2, “Optimizing Subqueries with Materialization”]。
+* `partitions` (JSON name: `partitions`) +
+查询将从其中匹配记录的分区。对于非分区表，该值为 `NULL`。请查看 https://dev.mysql.com/doc/refman/5.7/en/partitioning-info.html[Section 22.3.5, “Obtaining Information About Partitions”]。
+* `type` (JSON name: `access_type`) +
+连接类型。有关不同类型的说明，请参阅 https://dev.mysql.com/doc/refman/5.7/en/explain-output.html#explain-join-types[EXPLAIN Join Types]。
+* `possible_keys` (JSON name: `possible_keys`) +
+`possible_keys` 列指示MySQL可以从中选择查找此表中的行的索引。请注意，此列完全独立于 https://dev.mysql.com/doc/refman/5.7/en/explain.html[EXPLAIN] 输出中显示的表的顺序。这意味着 `possible_keys` 中的某些键可能无法在生成中使用生成的表顺序。
++
+如果此列为 `NULL` （或在JSON格式的输出中未定义），则没有相关索引。在这种情况下，您可以通过检查 `WHERE` 子句以检查它是否引用适合索引的某些列来提高查询性能。如果是，请创建适当的索引并再次使用 https://dev.mysql.com/doc/refman/5.7/en/explain.html[EXPLAIN] 检查查询。
+请查看 https://dev.mysql.com/doc/refman/5.7/en/alter-table.html[Section 13.1.8, “ALTER TABLE Syntax”]。
++
+要查看表有哪些索引，请使用 `SHOW INDEX FROM` *_tbl_name_*。
+* `key` (JSON name: `key`) +
+`key` 列指明MySQL实际决定使用的键（索引）。如果MySQL决定使用 `possible_keys` 的其中一个索引来查找行，那么该索引将被列为键值。
++
+`key` 可能会命名一个不存在于 `possible_keys` 值中的索引。如果所有 `possible_keys` 索引都不适合查找行但查询选择的所有列都是其他索引的列，则会发生这种情况。也就是说，命名索引覆盖了所选列，因此虽然它不用于确定要检索的行，但索引扫描比数据行扫描更有效。
++
+对于 `InnoDB`，即使查询还选择主键，辅助索引也可能覆盖所选列，因为 `InnoDB` 将主键值与每个辅助索引一起存储。如果 `key` 为 `NULL`，则MySQL找不到用于更有效地执行查询的索引。
++
+要强制MySQL使用或忽略 `possible_keys` 列中列出的索引，请在查询中使用 `FORCE INDEX`、`USE INDEX` 或 `IGNORE INDEX`。请查看 https://dev.mysql.com/doc/refman/5.7/en/index-hints.html[Section 8.9.4, “Index Hints”]。
++
+对于 `MyISAM` 表，运行 https://dev.mysql.com/doc/refman/5.7/en/analyze-table.html[ANALYZE TABLE] 可帮助优化器选择最佳的索引。对于 `MyISAM` 表， https://dev.mysql.com/doc/refman/5.7/en/myisamchk.html[myisamchk --analyze] 效果相同。
+请查看 https://dev.mysql.com/doc/refman/5.7/en/analyze-table.html[Section 13.7.2.1, “ANALYZE TABLE Syntax”] 和 https://dev.mysql.com/doc/refman/5.7/en/myisam-table-maintenance.html[Section 7.6, “MyISAM Table Maintenance and Crash Recovery”]。
+* `key_len` (JSON name: `key_length`) +
+`key_len` 列指示MySQL决定使用的键的长度。`key_len` 的值使你可以确定多部分键的多少部分被MySQL实际使用。如果 `key` 显示为 `NULL`，则 `key_len` 也显示为 `NULL`。
++
+由于键存储格式，对于可以为 `NULL` 的列而言，键长度比对于 `NOT NULL` 列更大。
+* `ref` (JSON name: `ref`) +
+`ref` 列显示哪些列或常量与 `key` 列中指定的索引进行比较，以从表中选择行。
++
+如果值为 `func`，则使用的值是某个函数的结果。要查看是哪个函数，请使用 https://dev.mysql.com/doc/refman/5.7/en/explain.html[EXPLAIN] 之后的 https://dev.mysql.com/doc/refman/5.7/en/show-warnings.html[SHOW WARNINGS] 来查看扩展的 https://dev.mysql.com/doc/refman/5.7/en/explain.html[EXPLAIN] 输出。
+该函数实际上可能是算术运算符等运算符。
+* `rows` (JSON name: `rows`) +
+`rows` 列表示MySQL认为必须检查以执行查询的行数。
++
+对于 https://dev.mysql.com/doc/refman/5.7/en/innodb-storage-engine.html[InnoDB] 表，此数字是估计值，可能并不总是准确的。
+* `filtered` (JSON name: `filtered`) +
+`filtered` 列指示按表条件筛选的表行的百分比。最大值为 100，这意味着不会对行进行过滤。值从100开始减少表示过滤量增加。 `rows` 显示检查的估计行数， `rows × filtered` 显示将与下表连接的行数。
+例如，如果 `rows` 为 1000 且 `filtered` 为 50.00（50％），则使用下表连接的行数为 1000 × 50% = 500。
+* `Extra` (JSON name: none) +
+此列包含有关MySQL如何解析查询的其他信息。有关不同值的说明，请参阅 https://dev.mysql.com/doc/refman/5.7/en/explain-output.html#explain-extra-information[EXPLAIN Extra Information]。
++
+没有与 `Extra` 列对应的单个 JSON 属性；但是，此列中可能出现的值将作为JSON属性公开，或者作为 `message` 属性的文本公开。
+
+
+[[explain-join-types]]
+*EXPLAIN Join Types* +
+https://dev.mysql.com/doc/refman/8.0/en/explain.html[EXPLAIN] 输出的 `type` 列描述表的连接方式。在JSON格式的输出中，这些是作为 `access_type` 属性的值找到的。
+以下列表描述了从最佳类型到最差类型的连接类型：
+
+* https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_system[system] +
+该表只有一行（=系统表）。这是 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_const[const] 连接类型的特例。
+* https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_const[const] +
+该表最多只有一个匹配行，在查询开头读取。因为只有一行，所以优化器的其余部分可以将此行中列的值视为常量。 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_const[const] 表非常快，因为它们只读一次。
++
+将 `PRIMARY KEY` 或 `UNIQUE` 索引的所有部分与常量值进行比较时使用 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_const[const]。在以下查询中， *_tbl_name_* 可用作 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_const[const] 表。
++
+====
+[source, sql]
+----
+SELECT * FROM tbl_name WHERE primary_key=1;
+
+SELECT * FROM tbl_name
+  WHERE primary_key_part1=1 AND primary_key_part2=2;
+----
+====
+* https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_eq_ref[eq_ref] +
+对于前面表格中的每个行组合，从该表中读取一行。除了 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_system[system] 和 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_const[const] 之外，这是最好的连接类型。
+当连接使用索引的所有部分并且索引是 `PRIMARY KEY` 或 `UNIQUE NOT NULL` 索引时使用它。 +
+https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_eq_ref[eq_ref] 可用于使用 `=` 运算符进行比较的索引列。比较值可以是常量，也可以是使用在此表之前读取的表中的列的表达式。在以下示例中，MySQL 可以使用 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_eq_ref[eq_ref] 连接来处理 *_ref_table_* ：
++
+====
+[source, sql]
+----
+SELECT * FROM ref_table,other_table
+  WHERE ref_table.key_column=other_table.column;
+
+SELECT * FROM ref_table,other_table
+  WHERE ref_table.key_column_part1=other_table.column
+  AND ref_table.key_column_part2=1;
+----
+====
+* https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_ref[ref] +
+对于上一个表中的每个行组合，将从此表中读取所有具有匹配索引值的行。如果连接仅使用键的最左前缀或者键不是 `PRIMARY KEY` 或 `UNIQUE` 索引，则使用 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_ref[ref] （换句话说，如果连接不能基于键值选择单行）。如果使用的键只匹配几行，这是一个很好的连接类型。
++
+https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_ref[ref] 可用于使用 `=` 或 `\<\=>` 运算符进行比较的索引列。在以下示例中，MySQL可以使用 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_ref[ref] 连接来处理 *_ref_table_* ：
++
+====
+[source, sql]
+----
+SELECT * FROM ref_table WHERE key_column=expr;
+
+SELECT * FROM ref_table,other_table
+  WHERE ref_table.key_column=other_table.column;
+
+SELECT * FROM ref_table,other_table
+  WHERE ref_table.key_column_part1=other_table.column
+  AND ref_table.key_column_part2=1;
+----
+====
+* https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_fulltext[fulltext] +
+使用 `FULLTEXT` 索引执行该连接。
+* https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_ref_or_null[ref_or_null] +
+这种连接类型与 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_ref[ref] 类似，但附加的是MySQL对包含 `NULL` 值的行进行额外搜索。此连接类型优化最常用于解析子查询。
+在以下示例中，MySQL可以使用 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_ref_or_null[ref_or_null] 连接来处理 *_ref_table_*：
++
+====
+[source, sql]
+----
+SELECT * FROM ref_table
+  WHERE key_column=expr OR key_column IS NULL;
+----
+====
++
+请查看 https://dev.mysql.com/doc/refman/8.0/en/is-null-optimization.html[Section 8.2.1.13, “IS NULL Optimization”]。
+* https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_index_merge[index_merge] +
+此连接类型指明使用了索引合并优化。在这种情况下
+
+
+此连接类型类似于 https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#jointype_unique_subquery[unique_subquery]。
+
+
+
+
+
