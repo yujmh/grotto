@@ -41,3 +41,8 @@ synchronized 关键字提供了一种排他式的数据同步机制，某个线�
 
 
 
+== 线程池拒绝策略
+* `CallerRunsPolicy` 调用者自己执行，除非线程池被shutdown
+* `AbortPolicy` 抛出 `RejectedExecutionException`
+* `DiscardPolicy` 直接丢弃任务
+* `DiscardOldestPolicy` 丢弃最早加入任务队列的任务
